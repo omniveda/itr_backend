@@ -133,4 +133,82 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Send selected customers to subadmin
+router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
+  const { customerIds } = req.body;
+
+  if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0) {
+    return res.status(400).json({ message: 'Customer IDs are required' });
+  }
+
+  try {
+    // Verify that all customers belong to the agent
+    const placeholders = customerIds.map(() => '?').join(',');
+    const [customers] = await pool.query(
+      `SELECT id FROM customer WHERE id IN (${placeholders}) AND agent_id = ?`,
+      [...customerIds, req.agentId]
+    );
+
+    if (customers.length !== customerIds.length) {
+      return res.status(400).json({ message: 'Some customers not found or do not belong to you' });
+    }
+
+    // Check which customers have already been sent
+    const [existing] = await pool.query(
+      `SELECT customer_id FROM subadmin_itr WHERE customer_id IN (${placeholders}) AND agent_id = ?`,
+      [...customerIds, req.agentId]
+    );
+
+    const alreadySentIds = existing.map(row => row.customer_id);
+    const newCustomerIds = customerIds.filter(id => !alreadySentIds.includes(id));
+
+    if (newCustomerIds.length === 0) {
+      return res.status(400).json({ message: 'All selected customers have already been sent to subadmin' });
+    }
+
+    // Insert new records into subadmin_itr table
+    const values = newCustomerIds.map(customerId => [customerId, req.agentId]);
+    const placeholdersInsert = values.map(() => '(?, ?)').join(',');
+    const flatValues = values.flat();
+
+    await pool.query(
+      `INSERT INTO subadmin_itr (customer_id, agent_id) VALUES ${placeholdersInsert}`,
+      flatValues
+    );
+
+    // Update subadmin_send to true for sent customers
+    const updatePlaceholders = newCustomerIds.map(() => '?').join(',');
+    await pool.query(
+      `UPDATE customer SET subadmin_send = TRUE WHERE id IN (${updatePlaceholders}) AND agent_id = ?`,
+      [...newCustomerIds, req.agentId]
+    );
+
+    res.json({
+      message: `${newCustomerIds.length} customer(s) sent to subadmin successfully`,
+      sentCount: newCustomerIds.length,
+      alreadySentCount: alreadySentIds.length
+    });
+  } catch (error) {
+    console.error('Error sending customers to subadmin:', error);
+    res.status(500).json({ message: 'Failed to send customers to subadmin' });
+  }
+});
+
+// Get customers sent to subadmin (for subadmin view)
+router.get('/sent-to-subadmin', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT c.*, si.sent_at, a.name as agent_name
+      FROM subadmin_itr si
+      JOIN customer c ON si.customer_id = c.id
+      JOIN agent a ON si.agent_id = a.id
+      ORDER BY si.sent_at DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching sent customers:', error);
+    res.status(500).json({ message: 'Failed to fetch sent customers' });
+  }
+});
+
 export default router;

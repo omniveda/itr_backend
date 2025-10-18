@@ -11,7 +11,7 @@ const config = {
 
 async function addAgentEditToITRTable() {
   const connection = await mysql.createConnection(config);
-  try {
+  try { 
     const alterTableSQL = `
       ALTER TABLE itr ADD COLUMN agentedit BOOLEAN DEFAULT FALSE;
     `;
