@@ -5,6 +5,9 @@ import authRoutes from './routes/auth.js';
 import uploadRoutes from './routes/upload.js';
 import customerRoutes from './routes/customer.js';
 import itrRoutes from './routes/itr.js';
+import subadminRoutes from './routes/subadmin.js';
+import caRoutes from './routes/ca.js';
+import assignedItrsRouter from './routes/assignedItrs.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,7 +41,11 @@ app.use('/upload', uploadRoutes);
 
 // Use customer routes
 app.use('/customer', customerRoutes);
+
 app.use('/itr', itrRoutes);
+app.use('/subadmin', subadminRoutes);
+app.use('/ca', caRoutes);
+app.use('/api/assigned-itrs', assignedItrsRouter);
 
 initDb().then(() => {
   app.listen(PORT, () => {

@@ -7,7 +7,7 @@ import { pool } from '../db.js';
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
-  const { subadmin, username, password, ...agentData } = req.body;
+  const { subadmin, ca, username, password, ...agentData } = req.body;
 
   if (subadmin) {
     // Register subadmin
@@ -49,13 +49,39 @@ router.post('/register', async (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-  const { email, password, subadmin } = req.body;
+  const { email, password, subadmin, ca } = req.body;
   if (!email || !password) {
-    return res.status(400).json({ message: 'Mobile number and password are required' });
+    return res.status(400).json({ message: 'Mobile number/username and password are required' });
   }
 
   try {
-    if (subadmin) {
+    if (ca) {
+      // CA login
+      console.log('Attempting CA login with username:', email); // Add logging
+      const [rows] = await pool.query('SELECT * FROM ca WHERE username = ?', [email]);
+      console.log('CA query results:', rows.length ? 'Found' : 'Not found'); // Add logging
+      if (rows.length === 0) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      const caUser = rows[0];
+      console.log('Found CA user:', { id: caUser.id, username: caUser.username, name: caUser.name }); // Add logging
+      const isValidPassword = await bcrypt.compare(password, caUser.password);
+      console.log('Password validation:', isValidPassword ? 'Success' : 'Failed'); // Add logging
+      if (!isValidPassword) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      const token = jwt.sign({ id: caUser.id, username: caUser.username, isCA: true }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      res.json({
+        token,
+        ca: {
+          id: caUser.id,
+          username: caUser.username,
+          name: caUser.name,
+          email: caUser.email,
+          isCA: true
+        }
+      });
+    } else if (subadmin) {
       // Subadmin login
       const [rows] = await pool.query('SELECT * FROM subadmin WHERE username = ?', [email]);
       if (rows.length === 0) {
@@ -121,7 +147,13 @@ router.get('/me', async (req, res) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('Decoded token:', decoded);
-    if (decoded.issubadmin) {
+    if (decoded.isCA) {
+      const [rows] = await pool.query('SELECT id, username, name, email FROM ca WHERE id = ?', [decoded.id]);
+      if (rows.length === 0) {
+        return res.status(404).json({ message: 'CA not found' });
+      }
+      res.json({ ca: rows[0] });
+    } else if (decoded.issubadmin) {
       const [rows] = await pool.query('SELECT id, username, issubadmin FROM subadmin WHERE id = ?', [decoded.id]);
       if (rows.length === 0) {
         return res.status(404).json({ message: 'Subadmin not found' });
