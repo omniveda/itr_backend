@@ -7,10 +7,11 @@ import { pool } from '../db.js';
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
-  const { subadmin, ca, username, password, ...agentData } = req.body;
+  const { subadmin, ca, username, ...data } = req.body;
 
   if (subadmin) {
     // Register subadmin
+    const { password } = data;
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password are required for subadmin' });
     }
@@ -27,7 +28,7 @@ router.post('/register', async (req, res) => {
     }
   } else {
     // Register agent
-    let { name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password } = agentData;
+    const { name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password } = data;
     if (!name || !mobile_no || !password) {
       return res.status(400).json({ message: 'Name, mobile number, and password are required' });
     }
@@ -49,13 +50,33 @@ router.post('/register', async (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-  const { email, password, subadmin, ca } = req.body;
+  const { email, password, subadmin, ca, superadmin } = req.body;
   if (!email || !password) {
     return res.status(400).json({ message: 'Mobile number/username and password are required' });
   }
 
   try {
-    if (ca) {
+    if (superadmin) {
+      // Superadmin login
+      const [rows] = await pool.query('SELECT * FROM superadmin WHERE username = ?', [email]);
+      if (rows.length === 0) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      const superadminUser = rows[0];
+      const isValidPassword = await bcrypt.compare(password, superadminUser.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      const token = jwt.sign({ id: superadminUser.id, issuperadmin: true }, process.env.JWT_SECRET);
+      res.json({
+        token,
+        superadmin: {
+          id: superadminUser.id,
+          username: superadminUser.username,
+          issuperadmin: true
+        }
+      });
+    } else if (ca) {
       // CA login
       console.log('Attempting CA login with username:', email); // Add logging
       const [rows] = await pool.query('SELECT * FROM ca WHERE username = ?', [email]);
@@ -70,7 +91,7 @@ router.post('/login', async (req, res) => {
       if (!isValidPassword) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
-      const token = jwt.sign({ id: caUser.id, username: caUser.username, isCA: true }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign({ id: caUser.id, username: caUser.username, isCA: true }, process.env.JWT_SECRET);
       res.json({
         token,
         ca: {
@@ -92,7 +113,7 @@ router.post('/login', async (req, res) => {
       if (!isValidPassword) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
-      const token = jwt.sign({ id: subadminUser.id, username: subadminUser.username, issubadmin: true }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign({ id: subadminUser.id, username: subadminUser.username, issubadmin: true }, process.env.JWT_SECRET);
       res.json({
         token,
         subadmin: {
@@ -114,7 +135,7 @@ router.post('/login', async (req, res) => {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
-      const token = jwt.sign({ id: agent.id, mobile_no: agent.mobile_no }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign({ id: agent.id, mobile_no: agent.mobile_no }, process.env.JWT_SECRET);
       res.json({
         token,
         agent: {
@@ -147,7 +168,13 @@ router.get('/me', async (req, res) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('Decoded token:', decoded);
-    if (decoded.isCA) {
+    if (decoded.issuperadmin) {
+      const [rows] = await pool.query('SELECT id, username FROM superadmin WHERE id = ?', [decoded.id]);
+      if (rows.length === 0) {
+        return res.status(404).json({ message: 'Superadmin not found' });
+      }
+      res.json({ superadmin: { ...rows[0], issuperadmin: true } });
+    } else if (decoded.isCA) {
       const [rows] = await pool.query('SELECT id, username, name, email FROM ca WHERE id = ?', [decoded.id]);
       if (rows.length === 0) {
         return res.status(404).json({ message: 'CA not found' });

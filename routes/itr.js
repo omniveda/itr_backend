@@ -22,7 +22,12 @@ const authenticateToken = (req, res, next) => {
 // Get all ITR entries for the agent
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM itr WHERE agent_id = ?', [req.agentId]);
+    const [rows] = await pool.query(`
+      SELECT itr.*, customer.name as customer_name, customer.pan_number as customer_pan
+      FROM itr
+      JOIN customer ON itr.customer_id = customer.id
+      WHERE itr.agent_id = ?
+    `, [req.agentId]);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching ITR entries:', error);
@@ -32,31 +37,16 @@ router.get('/', authenticateToken, async (req, res) => {
 
 // Create new ITR entry
 router.post('/', authenticateToken, async (req, res) => {
-  const {
-    name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-    tds_details, itr_password, asst_year, income_salary_business, mobile_no_adhar_registered,
-    mail_id, income_slab, comment_box, attachment_1, attachment_2, attachment_3, attachment_4, attachment_5,
-    customer_id, agentedit
-  } = req.body;
+  const { customer_id, asst_year, status } = req.body;
 
-  if (!name || !pan_number || !customer_id) {
-    return res.status(400).json({ message: 'Name, PAN number, and customer_id are required' });
+  if (!customer_id || !asst_year) {
+    return res.status(400).json({ message: 'Customer ID and assessment year are required' });
   }
 
   try {
     const [result] = await pool.query(
-      `INSERT INTO itr (
-        name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-        tds_details, itr_password, asst_year, income_salary_business, mobile_no_adhar_registered,
-        mail_id, income_slab, comment_box, attachment_1, attachment_2, attachment_3, attachment_4, attachment_5,
-        agent_id, customer_id, agentedit
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-        tds_details, itr_password, asst_year, income_salary_business, mobile_no_adhar_registered,
-        mail_id, income_slab, comment_box, attachment_1, attachment_2, attachment_3, attachment_4, attachment_5,
-        req.agentId, customer_id, agentedit || false
-      ]
+      `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status) VALUES (?, ?, ?, ?, ?)`,
+      [customer_id, asst_year, req.agentId, false, status || 'Pending']
     );
     res.status(201).json({ message: 'ITR added successfully', itrId: result.insertId });
   } catch (error) {

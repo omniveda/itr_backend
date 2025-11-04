@@ -56,6 +56,85 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Create customer with wallet payment
+router.post('/with-payment', authenticateToken, async (req, res) => {
+  const { paymentMethod, ...customerData } = req.body;
+
+  if (paymentMethod !== 'wallet') {
+    return res.status(400).json({ message: 'This endpoint only supports wallet payment' });
+  }
+
+  const amount = parseFloat(customerData.file_charge || 0);
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ message: 'Valid file charge is required' });
+  }
+
+  if (!customerData.name || !customerData.mobile_no || !customerData.pan_number) {
+    return res.status(400).json({ message: 'Name, mobile number, and PAN number are required' });
+  }
+
+  try {
+    await pool.query('START TRANSACTION');
+
+    // Check agent balance
+    const [agentRows] = await pool.query(
+      'SELECT wbalance FROM agent WHERE id = ? FOR UPDATE',
+      [req.agentId]
+    );
+
+    if (agentRows.length === 0) {
+      await pool.query('ROLLBACK');
+      return res.status(404).json({ message: 'Agent not found' });
+    }
+
+    const currentBalance = agentRows[0].wbalance || 0;
+
+    if (currentBalance < amount) {
+      await pool.query('ROLLBACK');
+      return res.status(400).json({ message: 'Insufficient wallet balance' });
+    }
+
+    // Deduct from wallet
+    await pool.query(
+      'UPDATE agent SET wbalance = wbalance - ? WHERE id = ?',
+      [amount, req.agentId]
+    );
+
+    // Insert customer
+    const hashedPassword = customerData.password ? await bcrypt.hash(customerData.password, 10) : null;
+    const [customerResult] = await pool.query(
+      `INSERT INTO customer (
+        name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
+        tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
+        last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3,
+        attachments_4, attachments_5, file_charge, income_slab, comment_box, customer_type, agent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        customerData.name, customerData.father_name, customerData.dob, customerData.pan_number, customerData.adhar_number, customerData.account_number, customerData.bank_name, customerData.ifsc_code,
+        customerData.tds_amount, customerData.itr_password, customerData.asst_year_3yr, customerData.income_type, customerData.mobile_no, customerData.mail_id, customerData.filling_type,
+        customerData.last_ay_income, customerData.profile_photo, customerData.user_id, hashedPassword, customerData.attachments_1, customerData.attachments_2, customerData.attachments_3,
+        customerData.attachments_4, customerData.attachments_5, customerData.file_charge, customerData.income_slab, customerData.comment_box, customerData.customer_type, req.agentId
+      ]
+    );
+
+    const customerId = customerResult.insertId;
+
+    // Insert payment record
+    await pool.query(
+      'INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method) VALUES (?, ?, ?, TRUE, ?)',
+      [req.agentId, customerId, amount, paymentMethod]
+    );
+
+    await pool.query('COMMIT');
+    res.status(201).json({ message: 'Customer added and payment processed successfully', customerId });
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('Error adding customer with payment:', error);
+    res.status(500).json({ message: 'Failed to add customer and process payment' });
+  }
+});
+
+
 // Get all customers for the agent
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -133,19 +212,22 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Send selected customers to subadmin
+// Send selected customers to subadmin with assessment year
 router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
-  const { customerIds } = req.body;
+  const { customersWithYears } = req.body;
 
-  if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0) {
-    return res.status(400).json({ message: 'Customer IDs are required' });
+  if (!customersWithYears || !Array.isArray(customersWithYears) || customersWithYears.length === 0) {
+    return res.status(400).json({ message: 'Customers with years are required' });
   }
 
   try {
+    const customerIds = customersWithYears.map(item => item.customerId);
+    const asstYears = customersWithYears.map(item => item.asstYear);
+
     // Verify that all customers belong to the agent
     const placeholders = customerIds.map(() => '?').join(',');
     const [customers] = await pool.query(
-      `SELECT id FROM customer WHERE id IN (${placeholders}) AND agent_id = ?`,
+      `SELECT id, name, pan_number FROM customer WHERE id IN (${placeholders}) AND agent_id = ?`,
       [...customerIds, req.agentId]
     );
 
@@ -153,30 +235,68 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Some customers not found or do not belong to you' });
     }
 
-    // Check which customers have already been sent
-    const [existing] = await pool.query(
-      `SELECT customer_id FROM subadmin_itr WHERE customer_id IN (${placeholders}) AND agent_id = ?`,
-      [...customerIds, req.agentId]
-    );
+    const newEntries = [];
+    const alreadySent = [];
+    const unpaidCustomers = [];
 
-    const alreadySentIds = existing.map(row => row.customer_id);
-    const newCustomerIds = customerIds.filter(id => !alreadySentIds.includes(id));
+    for (const item of customersWithYears) {
+      const { customerId, asstYear } = item;
 
-    if (newCustomerIds.length === 0) {
-      return res.status(400).json({ message: 'All selected customers have already been sent to subadmin' });
+      // Check if already sent for this assessment year
+      const [existing] = await pool.query(
+        `SELECT id FROM itr WHERE customer_id = ? AND agent_id = ? AND asst_year = ?`,
+        [customerId, req.agentId, asstYear]
+      );
+
+      if (existing.length > 0) {
+        alreadySent.push({ customerId, asstYear });
+        continue;
+      }
+
+      // Check payment status
+      const [paymentRows] = await pool.query(
+        'SELECT paid FROM payment WHERE customer_id = ? AND agent_id = ?',
+        [customerId, req.agentId]
+      );
+
+      const hasPaid = paymentRows.length > 0 && paymentRows[0].paid;
+
+      if (!hasPaid) {
+        unpaidCustomers.push({ customerId, asstYear });
+      } else {
+        newEntries.push({ customerId, asstYear });
+      }
     }
 
-    // Insert new records into subadmin_itr table
-    const values = newCustomerIds.map(customerId => [customerId, req.agentId]);
-    const placeholdersInsert = values.map(() => '(?, ?)').join(',');
+    if (unpaidCustomers.length > 0) {
+      return res.status(400).json({
+        message: 'Payment required for some customers before sending to subadmin',
+        unpaidCustomers
+      });
+    }
+
+    if (newEntries.length === 0) {
+      return res.status(400).json({ message: 'All selected customers have already been sent for their respective assessment years' });
+    }
+
+    // Insert new records into itr table
+    const values = newEntries.map(entry => [
+      entry.customerId,
+      entry.asstYear,
+      req.agentId,
+      false, // agentedit
+      'Pending' // status
+    ]);
+    const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?)').join(',');
     const flatValues = values.flat();
 
     await pool.query(
-      `INSERT INTO subadmin_itr (customer_id, agent_id) VALUES ${placeholdersInsert}`,
+      `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status) VALUES ${placeholdersInsert}`,
       flatValues
     );
 
     // Update subadmin_send to true for sent customers
+    const newCustomerIds = newEntries.map(entry => entry.customerId);
     const updatePlaceholders = newCustomerIds.map(() => '?').join(',');
     await pool.query(
       `UPDATE customer SET subadmin_send = TRUE WHERE id IN (${updatePlaceholders}) AND agent_id = ?`,
@@ -184,9 +304,9 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
     );
 
     res.json({
-      message: `${newCustomerIds.length} customer(s) sent to subadmin successfully`,
-      sentCount: newCustomerIds.length,
-      alreadySentCount: alreadySentIds.length
+      message: `${newEntries.length} customer(s) sent to subadmin successfully`,
+      sentCount: newEntries.length,
+      alreadySentCount: alreadySent.length
     });
   } catch (error) {
     console.error('Error sending customers to subadmin:', error);

@@ -9,20 +9,20 @@ const config = {
   port: 3306,
 };
 
-async function addSubadminSendToCustomerTable() {
+async function addStatusToITRTable() {
   const connection = await mysql.createConnection(config);
   try {
     const alterTableSQL = `
-      ALTER TABLE customer
-      ADD COLUMN subadmin_send BOOLEAN DEFAULT FALSE;
+      ALTER TABLE itr
+      ADD COLUMN status TINYINT DEFAULT 0;
     `;
     await connection.execute(alterTableSQL);
-    console.log('Added subadmin_send column to customer table.');
+    console.log('Status column added to ITR table.');
   } catch (error) {
-    console.error('Error adding subadmin_send column:', error);
+    console.error('Error adding status column to ITR table:', error);
   } finally {
     await connection.end();
   }
 }
 
-addSubadminSendToCustomerTable();
+addStatusToITRTable();

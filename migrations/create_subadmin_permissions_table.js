@@ -10,24 +10,25 @@ const config = {
   port: 3306,
 };
 
-async function createSubadminTable() {
+async function createSubadminPermissionsTable() {
   const connection = await mysql.createConnection(config);
   try {
     const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS subadmin (
+      CREATE TABLE IF NOT EXISTS subadmin_permissions (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(255) NOT NULL UNIQUE,
-        password VARCHAR(255) NOT NULL,
-        issubadmin BOOLEAN DEFAULT TRUE
+        subadmin_id INT NOT NULL,
+        permission VARCHAR(255) NOT NULL,
+        FOREIGN KEY (subadmin_id) REFERENCES subadmin(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_subadmin_permission (subadmin_id, permission)
       );
     `;
     await connection.execute(createTableSQL);
-    console.log('Subadmin table created or already exists.');
+    console.log('Subadmin permissions table created or already exists.');
   } catch (error) {
-    console.error('Error creating subadmin table:', error);
+    console.error('Error creating subadmin permissions table:', error);
   } finally {
     await connection.end();
   }
 }
 
-createSubadminTable();
+createSubadminPermissionsTable();

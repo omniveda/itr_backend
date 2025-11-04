@@ -10,24 +10,24 @@ const config = {
   port: 3306,
 };
 
-async function createSubadminTable() {
+async function createSuperadminTable() {
   const connection = await mysql.createConnection(config);
   try {
     const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS subadmin (
+      CREATE TABLE IF NOT EXISTS superadmin (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(255) NOT NULL UNIQUE,
         password VARCHAR(255) NOT NULL,
-        issubadmin BOOLEAN DEFAULT TRUE
+        issuperadmin BOOLEAN DEFAULT TRUE
       );
     `;
     await connection.execute(createTableSQL);
-    console.log('Subadmin table created or already exists.');
+    console.log('Superadmin table created or already exists.');
   } catch (error) {
-    console.error('Error creating subadmin table:', error);
+    console.error('Error creating superadmin table:', error);
   } finally {
     await connection.end();
   }
 }
 
-createSubadminTable();
+createSuperadminTable();
