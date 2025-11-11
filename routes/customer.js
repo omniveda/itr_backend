@@ -1,9 +1,38 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import path from 'path';
 import { pool } from '../db.js';
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|pdf/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only .png, .jpg, .jpeg and .pdf files are allowed!'));
+    }
+  }
+});
 
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
@@ -20,13 +49,18 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-// Create customer
-router.post('/', authenticateToken, async (req, res) => {
+// Create customer with file uploads
+router.post('/', authenticateToken, upload.fields([
+  { name: 'attachments_1', maxCount: 1 },
+  { name: 'attachments_2', maxCount: 1 },
+  { name: 'attachments_3', maxCount: 1 },
+  { name: 'attachments_4', maxCount: 1 },
+  { name: 'attachments_5', maxCount: 1 }
+]), async (req, res) => {
   const {
     name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
     tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
-    last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3,
-    attachments_4, attachments_5, file_charge, income_slab, comment_box, customer_type
+    last_ay_income, profile_photo, user_id, password, file_charge, income_slab, comment_box, customer_type
   } = req.body;
 
   if (!name || !mobile_no || !pan_number) {
@@ -35,6 +69,17 @@ router.post('/', authenticateToken, async (req, res) => {
 
   try {
     const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
+
+    // Get uploaded file paths
+    const attachments = {};
+    for (let i = 1; i <= 5; i++) {
+      if (req.files && req.files[`attachments_${i}`] && req.files[`attachments_${i}`][0]) {
+        attachments[`attachments_${i}`] = req.files[`attachments_${i}`][0].filename;
+      } else {
+        attachments[`attachments_${i}`] = null;
+      }
+    }
+
     const [result] = await pool.query(
       `INSERT INTO customer (
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
@@ -45,8 +90,8 @@ router.post('/', authenticateToken, async (req, res) => {
       [
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
         tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
-        last_ay_income, profile_photo, user_id, hashedPassword, attachments_1, attachments_2, attachments_3,
-        attachments_4, attachments_5, file_charge, income_slab, comment_box, customer_type, req.agentId
+        last_ay_income, profile_photo, user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
+        attachments.attachments_4, attachments.attachments_5, file_charge, income_slab, comment_box, customer_type, req.agentId
       ]
     );
     res.status(201).json({ message: 'Customer added successfully', customerId: result.insertId });
@@ -56,8 +101,14 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Create customer with wallet payment
-router.post('/with-payment', authenticateToken, async (req, res) => {
+// Create customer with wallet payment and file uploads
+router.post('/with-payment', authenticateToken, upload.fields([
+  { name: 'attachments_1', maxCount: 1 },
+  { name: 'attachments_2', maxCount: 1 },
+  { name: 'attachments_3', maxCount: 1 },
+  { name: 'attachments_4', maxCount: 1 },
+  { name: 'attachments_5', maxCount: 1 }
+]), async (req, res) => {
   const { paymentMethod, ...customerData } = req.body;
 
   if (paymentMethod !== 'wallet') {
@@ -102,6 +153,17 @@ router.post('/with-payment', authenticateToken, async (req, res) => {
 
     // Insert customer
     const hashedPassword = customerData.password ? await bcrypt.hash(customerData.password, 10) : null;
+
+    // Get uploaded file paths
+    const attachments = {};
+    for (let i = 1; i <= 5; i++) {
+      if (req.files && req.files[`attachments_${i}`] && req.files[`attachments_${i}`][0]) {
+        attachments[`attachments_${i}`] = req.files[`attachments_${i}`][0].filename;
+      } else {
+        attachments[`attachments_${i}`] = null;
+      }
+    }
+
     const [customerResult] = await pool.query(
       `INSERT INTO customer (
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
@@ -112,8 +174,8 @@ router.post('/with-payment', authenticateToken, async (req, res) => {
       [
         customerData.name, customerData.father_name, customerData.dob, customerData.pan_number, customerData.adhar_number, customerData.account_number, customerData.bank_name, customerData.ifsc_code,
         customerData.tds_amount, customerData.itr_password, customerData.asst_year_3yr, customerData.income_type, customerData.mobile_no, customerData.mail_id, customerData.filling_type,
-        customerData.last_ay_income, customerData.profile_photo, customerData.user_id, hashedPassword, customerData.attachments_1, customerData.attachments_2, customerData.attachments_3,
-        customerData.attachments_4, customerData.attachments_5, customerData.file_charge, customerData.income_slab, customerData.comment_box, customerData.customer_type, req.agentId
+        customerData.last_ay_income, customerData.profile_photo, customerData.user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
+        attachments.attachments_4, attachments.attachments_5, customerData.file_charge, customerData.income_slab, customerData.comment_box, customerData.customer_type, req.agentId
       ]
     );
 

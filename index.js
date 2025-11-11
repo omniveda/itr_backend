@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { initDb, pool } from './db.js';
 import authRoutes from './routes/auth.js';
 import uploadRoutes from './routes/upload.js';
@@ -52,6 +53,9 @@ app.use('/api/assigned-itrs', assignedItrsRouter);
 app.use('/payment', paymentRoutes);
 app.use('/superadmin', superadminRoutes);
 app.use('/messages', messageRoutes);
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 initDb().then(() => {
   app.listen(PORT, () => {

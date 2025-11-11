@@ -41,4 +41,16 @@ router.get('/sent-customers', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/subadmin/permissions
+// Returns permissions for the authenticated subadmin
+router.get('/permissions', authenticateToken, async (req, res) => {
+  try {
+    const [permissions] = await pool.query('SELECT permission FROM subadmin_permissions WHERE subadmin_id = ?', [req.subadminId]);
+    res.json(permissions.map(p => p.permission));
+  } catch (error) {
+    console.error('Error fetching subadmin permissions:', error);
+    res.status(500).json({ message: 'Failed to fetch permissions' });
+  }
+});
+
 export default router;
