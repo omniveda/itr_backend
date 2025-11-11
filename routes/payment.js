@@ -130,7 +130,7 @@ router.post('/process', authenticateToken, async (req, res) => {
 
 // Complete Razorpay payment
 router.post('/complete-razorpay', authenticateToken, async (req, res) => {
-  const { paymentIds, razorpayPaymentId } = req.body;
+  const { paymentIds, razorpayPaymentId, asstYears } = req.body;
 
   if (!paymentIds || !Array.isArray(paymentIds) || paymentIds.length === 0 || !razorpayPaymentId) {
     return res.status(400).json({ message: 'Payment IDs array and Razorpay payment ID are required' });
@@ -146,6 +146,68 @@ router.post('/complete-razorpay', authenticateToken, async (req, res) => {
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'No payment records found' });
+    }
+
+    // Get customer IDs from payment records
+    const [paymentRows] = await pool.query(
+      `SELECT customer_id FROM payment WHERE id IN (${placeholders}) AND agent_id = ?`,
+      [...paymentIds, req.agentId]
+    );
+
+    const customerIds = paymentRows.map(row => row.customer_id);
+
+    // Automatically send paid customers to subadmin if asstYears provided
+    if (asstYears && Array.isArray(asstYears) && asstYears.length === customerIds.length) {
+      const customersWithYears = customerIds.map((customerId, index) => ({
+        customerId,
+        asstYear: asstYears[index]
+      }));
+
+      const newEntries = [];
+      const alreadySent = [];
+
+      for (const item of customersWithYears) {
+        const { customerId, asstYear } = item;
+
+        // Check if already sent for this assessment year
+        const [existing] = await pool.query(
+          `SELECT id FROM itr WHERE customer_id = ? AND agent_id = ? AND asst_year = ?`,
+          [customerId, req.agentId, asstYear]
+        );
+
+        if (existing.length > 0) {
+          alreadySent.push({ customerId, asstYear });
+          continue;
+        }
+
+        newEntries.push({ customerId, asstYear });
+      }
+
+      if (newEntries.length > 0) {
+        // Insert new records into itr table
+        const values = newEntries.map(entry => [
+          entry.customerId,
+          entry.asstYear,
+          req.agentId,
+          false, // agentedit
+          'Pending' // status
+        ]);
+        const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?)').join(',');
+        const flatValues = values.flat();
+
+        await pool.query(
+          `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status) VALUES ${placeholdersInsert}`,
+          flatValues
+        );
+
+        // Update subadmin_send to true for sent customers
+        const newCustomerIds = newEntries.map(entry => entry.customerId);
+        const updatePlaceholders = newCustomerIds.map(() => '?').join(',');
+        await pool.query(
+          `UPDATE customer SET subadmin_send = TRUE WHERE id IN (${updatePlaceholders}) AND agent_id = ?`,
+          [...newCustomerIds, req.agentId]
+        );
+      }
     }
 
     res.json({ message: 'Payment completed successfully' });

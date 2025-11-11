@@ -200,7 +200,12 @@ router.post('/with-payment', authenticateToken, upload.fields([
 // Get all customers for the agent
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM customer WHERE agent_id = ?', [req.agentId]);
+    const [rows] = await pool.query(`
+      SELECT c.*, CASE WHEN p.paid = 1 THEN 1 ELSE 0 END AS paid
+      FROM customer c
+      LEFT JOIN payment p ON c.id = p.customer_id AND c.agent_id = p.agent_id
+      WHERE c.agent_id = ?
+    `, [req.agentId]);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching customers:', error);
@@ -224,11 +229,28 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Update customer
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, upload.fields([
+  { name: 'attachments_1', maxCount: 1 },
+  { name: 'attachments_2', maxCount: 1 },
+  { name: 'attachments_3', maxCount: 1 },
+  { name: 'attachments_4', maxCount: 1 },
+  { name: 'attachments_5', maxCount: 1 }
+]), async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
+  const updates = req.body || {};
 
-  // Remove password if empty
+  // Handle file uploads
+  const attachments = {};
+  for (let i = 1; i <= 5; i++) {
+    if (req.files && req.files[`attachments_${i}`] && req.files[`attachments_${i}`][0]) {
+      attachments[`attachments_${i}`] = req.files[`attachments_${i}`][0].filename;
+    }
+  }
+
+  // Merge file paths into updates
+  Object.assign(updates, attachments);
+
+  // Handle password hashing
   if (updates.password) {
     updates.password = await bcrypt.hash(updates.password, 10);
   } else {
