@@ -27,7 +27,7 @@ const requireSuperadmin = (req, res, next) => {
 // Get all agents
 router.get('/agents', requireSuperadmin, async (req, res) => {
   try {
-    const [agents] = await pool.query('SELECT id, name, mobile_no, mail_id, isagent, wbalance FROM agent');
+    const [agents] = await pool.query('SELECT id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, isagent, wbalance FROM agent');
     res.json(agents);
   } catch (error) {
     console.error('Error fetching agents:', error);
@@ -71,15 +71,37 @@ router.put('/agents/:id/wallet', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Update agent details
+router.put('/agents/:id', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no } = req.body;
+  if (!name || !mobile_no || !mail_id) {
+    return res.status(400).json({ error: 'Name, mobile number, and email are required' });
+  }
+  try {
+    const [result] = await pool.query(
+      'UPDATE agent SET name = ?, father_name = ?, mobile_no = ?, mail_id = ?, address = ?, profile_photo = ?, alternate_mobile_no = ? WHERE id = ?',
+      [name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    res.json({ message: 'Agent updated successfully' });
+  } catch (error) {
+    console.error('Error updating agent:', error);
+    res.status(500).json({ error: 'Failed to update agent' });
+  }
+});
+
 // Get all subadmins with their permissions
 router.get('/subadmins', requireSuperadmin, async (req, res) => {
   try {
     const [subadmins] = await pool.query(`
-      SELECT s.id, s.username,
+      SELECT s.id, s.username, s.issubadmin,
              GROUP_CONCAT(sp.permission SEPARATOR ',') as permissions
       FROM subadmin s
       LEFT JOIN subadmin_permissions sp ON s.id = sp.subadmin_id
-      GROUP BY s.id, s.username
+      GROUP BY s.id, s.username, s.issubadmin
     `);
     // Parse permissions string into array
     const result = subadmins.map(subadmin => ({
@@ -195,11 +217,96 @@ router.put('/subadmins/:id/permissions', requireSuperadmin, async (req, res) => 
   }
 });
 
-// Get all CAs
+// Get subadmin password (for viewing only)
+router.get('/subadmins/:id/password', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT username, password FROM subadmin WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Subadmin not found' });
+    }
+    res.json({ username: rows[0].username, password: rows[0].password });
+  } catch (error) {
+    console.error('Error fetching subadmin password:', error);
+    res.status(500).json({ error: 'Failed to fetch subadmin password' });
+  }
+});
+
+// Duplicate a subadmin with same permissions
+router.post('/subadmins/:id/duplicate', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  try {
+    // Check if original subadmin exists
+    const [original] = await pool.query('SELECT id FROM subadmin WHERE id = ?', [id]);
+    if (original.length === 0) {
+      return res.status(404).json({ error: 'Original subadmin not found' });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create new subadmin
+    const [result] = await pool.query('INSERT INTO subadmin (username, password, issubadmin) VALUES (?, ?, TRUE)', [username, hashedPassword]);
+    const newSubadminId = result.insertId;
+
+    // Copy permissions from original subadmin
+    const [permissions] = await pool.query('SELECT permission FROM subadmin_permissions WHERE subadmin_id = ?', [id]);
+    if (permissions.length > 0) {
+      const values = permissions.map(p => [newSubadminId, p.permission]);
+      await pool.query('INSERT INTO subadmin_permissions (subadmin_id, permission) VALUES ?', [values]);
+    }
+
+    res.status(201).json({ message: 'Subadmin duplicated successfully' });
+  } catch (error) {
+    console.error('Error duplicating subadmin:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      res.status(409).json({ error: 'Username already exists' });
+    } else {
+      res.status(500).json({ error: 'Failed to duplicate subadmin' });
+    }
+  }
+});
+
+// Toggle subadmin status (issubadmin field)
+router.put('/subadmins/:id/status', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Get current status
+    const [rows] = await pool.query('SELECT issubadmin FROM subadmin WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Subadmin not found' });
+    }
+    const currentStatus = rows[0].issubadmin;
+    const newStatus = currentStatus ? false : true;
+
+    await pool.query('UPDATE subadmin SET issubadmin = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: `Subadmin ${newStatus ? 'activated' : 'deactivated'} successfully` });
+  } catch (error) {
+    console.error('Error updating subadmin status:', error);
+    res.status(500).json({ error: 'Failed to update subadmin status' });
+  }
+});
+
+// Get all CAs with their permissions
 router.get('/cas', requireSuperadmin, async (req, res) => {
   try {
-    const [cas] = await pool.query('SELECT id, name, username, email, isca FROM ca');
-    res.json(cas);
+    const [cas] = await pool.query(`
+      SELECT c.id, c.name, c.username, c.email, c.isca,
+             GROUP_CONCAT(cp.permission SEPARATOR ',') as permissions
+      FROM ca c
+      LEFT JOIN ca_permissions cp ON c.id = cp.ca_id
+      GROUP BY c.id, c.name, c.username, c.email, c.isca
+    `);
+    // Parse permissions string into array
+    const result = cas.map(ca => ({
+      ...ca,
+      permissions: ca.permissions ? ca.permissions.split(',') : []
+    }));
+    res.json(result);
   } catch (error) {
     console.error('Error fetching CAs:', error);
     res.status(500).json({ error: 'Failed to fetch CAs' });
@@ -274,6 +381,40 @@ router.delete('/cas/:id', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Get CA permissions
+router.get('/cas/:id/permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [permissions] = await pool.query('SELECT permission FROM ca_permissions WHERE ca_id = ?', [id]);
+    res.json(permissions.map(p => p.permission));
+  } catch (error) {
+    console.error('Error fetching CA permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch CA permissions' });
+  }
+});
+
+// Update CA permissions
+router.put('/cas/:id/permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { permissions } = req.body; // array of permission strings
+  if (!Array.isArray(permissions)) {
+    return res.status(400).json({ error: 'Permissions must be an array' });
+  }
+  try {
+    // Delete existing permissions
+    await pool.query('DELETE FROM ca_permissions WHERE ca_id = ?', [id]);
+    // Insert new permissions
+    if (permissions.length > 0) {
+      const values = permissions.map(permission => [id, permission]);
+      await pool.query('INSERT INTO ca_permissions (ca_id, permission) VALUES ?', [values]);
+    }
+    res.json({ message: 'CA permissions updated successfully' });
+  } catch (error) {
+    console.error('Error updating CA permissions:', error);
+    res.status(500).json({ error: 'Failed to update CA permissions' });
+  }
+});
+
 // Toggle CA status (using isca field as status indicator)
 router.put('/cas/:id/status', requireSuperadmin, async (req, res) => {
   const { id } = req.params;
@@ -294,11 +435,34 @@ router.put('/cas/:id/status', requireSuperadmin, async (req, res) => {
   }
 });
 
-// Get all customers
+// Get all customers with assignment status
 router.get('/customers', requireSuperadmin, async (req, res) => {
   try {
-    const [customers] = await pool.query('SELECT * FROM customer');
-    res.json(customers);
+    const { caId } = req.query;
+    let query = `
+      SELECT c.*, si.subadmin_id as assignedSubadminId
+      FROM customer c
+      LEFT JOIN subadmin_itr si ON c.id = si.customer_id
+    `;
+    let params = [];
+
+    if (caId) {
+      query += ` LEFT JOIN ca_itr ci ON c.id = ci.customer_id AND ci.ca_id = ?`;
+      params.push(caId);
+    }
+
+    const [customers] = await pool.query(query, params);
+
+    // If caId is provided, add assignedCAId
+    if (caId) {
+      const customersWithCA = customers.map(customer => ({
+        ...customer,
+        assignedCAId: customer.ca_id || null // Assuming the join adds ca_id if assigned
+      }));
+      res.json(customersWithCA);
+    } else {
+      res.json(customers);
+    }
   } catch (error) {
     console.error('Error fetching customers:', error);
     res.status(500).json({ error: 'Failed to fetch customers' });
@@ -324,17 +488,196 @@ router.get('/dashboard-stats', requireSuperadmin, async (req, res) => {
     const [caCount] = await pool.query('SELECT COUNT(*) as count FROM ca');
     const [customerCount] = await pool.query('SELECT COUNT(*) as count FROM customer');
     const [paymentStats] = await pool.query('SELECT SUM(amount) as totalRevenue FROM payment WHERE paid = TRUE');
+    const [itrpendingCount] = await pool.query('SELECT COUNT(*) as count FROM itr where status = "Pending"');
+    const [itrcompletedCount] = await pool.query('SELECT COUNT(*) as count FROM itr where status = "Completed"');
 
     res.json({
       agents: agentCount[0].count,
       subadmins: subadminCount[0].count,
       cas: caCount[0].count,
       customers: customerCount[0].count,
-      totalRevenue: paymentStats[0].totalRevenue || 0
+      totalRevenue: paymentStats[0].totalRevenue || 0,
+      itrpending: itrpendingCount[0].count,
+      itrcompleted: itrcompletedCount[0].count
     });
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard statistics' });
+  }
+});
+
+// Get all customer form fields
+router.get('/customer-form-fields', requireSuperadmin, async (req, res) => {
+  try {
+    const [fields] = await pool.query('SELECT * FROM customer_form_fields ORDER BY display_order');
+    res.json(fields);
+  } catch (error) {
+    console.error('Error fetching customer form fields:', error);
+    res.status(500).json({ error: 'Failed to fetch customer form fields' });
+  }
+});
+
+// Get customer form fields for agents (public endpoint)
+router.get('/customer-form-fields/public', async (req, res) => {
+  try {
+    const [fields] = await pool.query('SELECT * FROM customer_form_fields WHERE is_required = TRUE OR is_recommended = TRUE ORDER BY display_order');
+    res.json(fields);
+  } catch (error) {
+    console.error('Error fetching customer form fields:', error);
+    res.status(500).json({ error: 'Failed to fetch customer form fields' });
+  }
+});
+
+// Update customer form field settings
+router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { is_required, is_recommended } = req.body;
+
+  if ((typeof is_required !== 'boolean' && typeof is_required !== 'number') || (typeof is_recommended !== 'boolean' && typeof is_recommended !== 'number')) {
+    return res.status(400).json({ error: 'is_required and is_recommended must be boolean or number values' });
+  }
+
+  try {
+    const [result] = await pool.query(
+      'UPDATE customer_form_fields SET is_required = ?, is_recommended = ? WHERE id = ?',
+      [is_required, is_recommended, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Field not found' });
+    }
+
+    res.json({ message: 'Field settings updated successfully' });
+  } catch (error) {
+    console.error('Error updating customer form field:', error);
+    res.status(500).json({ error: 'Failed to update customer form field' });
+  }
+});
+
+// Get all ITRs
+router.get('/itrs', requireSuperadmin, async (req, res) => {
+  try {
+    const [itrs] = await pool.query(`
+      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at
+      FROM itr
+      LEFT JOIN customer ON itr.customer_id = customer.id
+    `);
+    res.json(itrs);
+  } catch (error) {
+    console.error('Error fetching ITRs:', error);
+    res.status(500).json({ error: 'Failed to fetch ITRs' });
+  }
+});
+
+// Allot customers to subadmin
+router.post('/subadmins/allot-customers', requireSuperadmin, async (req, res) => {
+  const { subadminId, customerIds } = req.body;
+
+  if (!subadminId || !Array.isArray(customerIds) || customerIds.length === 0) {
+    return res.status(400).json({ error: 'subadminId and customerIds array are required' });
+  }
+
+  try {
+    // Verify subadmin exists
+    const [subadminRows] = await pool.query('SELECT id FROM subadmin WHERE id = ?', [subadminId]);
+    if (subadminRows.length === 0) {
+      return res.status(404).json({ error: 'Subadmin not found' });
+    }
+
+    // Verify all customers exist
+    const [customerRows] = await pool.query('SELECT id FROM customer WHERE id IN (?)', [customerIds]);
+    if (customerRows.length !== customerIds.length) {
+      return res.status(404).json({ error: 'One or more customers not found' });
+    }
+
+    // Insert records into subadmin_itr table
+    const values = customerIds.map(customerId => [customerId, subadminId]);
+    await pool.query('INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ?', [values]);
+
+    // Update customer table to set subadmin_send = TRUE
+    await pool.query('UPDATE customer SET subadmin_send = TRUE WHERE id IN (?)', [customerIds]);
+
+    res.json({ message: 'Customers allotted to subadmin successfully' });
+  } catch (error) {
+    console.error('Error allotting customers to subadmin:', error);
+    res.status(500).json({ error: 'Failed to allot customers to subadmin' });
+  }
+});
+
+// Remove customer allotment from subadmin
+router.delete('/subadmins/:subadminId/allot-customers/:customerId', requireSuperadmin, async (req, res) => {
+  const { subadminId, customerId } = req.params;
+
+  try {
+    // Verify the allotment exists
+    const [rows] = await pool.query('SELECT id FROM subadmin_itr WHERE customer_id = ? AND subadmin_id = ?', [customerId, subadminId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Customer allotment not found' });
+    }
+
+    // Delete the allotment record
+    await pool.query('DELETE FROM subadmin_itr WHERE customer_id = ? AND subadmin_id = ?', [customerId, subadminId]);
+
+    // Update customer table to set subadmin_send = FALSE
+    await pool.query('UPDATE customer SET subadmin_send = FALSE WHERE id = ?', [customerId]);
+
+    res.json({ message: 'Customer allotment removed successfully' });
+  } catch (error) {
+    console.error('Error removing customer allotment:', error);
+    res.status(500).json({ error: 'Failed to remove customer allotment' });
+  }
+});
+
+// Allot customers to CA
+router.post('/cas/allot-customers', requireSuperadmin, async (req, res) => {
+  const { caId, customerIds } = req.body;
+
+  if (!caId || !Array.isArray(customerIds) || customerIds.length === 0) {
+    return res.status(400).json({ error: 'caId and customerIds array are required' });
+  }
+
+  try {
+    // Verify CA exists
+    const [caRows] = await pool.query('SELECT id FROM ca WHERE id = ?', [caId]);
+    if (caRows.length === 0) {
+      return res.status(404).json({ error: 'CA not found' });
+    }
+
+    // Verify all customers exist
+    const [customerRows] = await pool.query('SELECT id FROM customer WHERE id IN (?)', [customerIds]);
+    if (customerRows.length !== customerIds.length) {
+      return res.status(404).json({ error: 'One or more customers not found' });
+    }
+
+    // Insert records into ca_itr table (only ca_id and customer_id, leave other fields blank)
+    const values = customerIds.map(customerId => [customerId, caId]);
+    await pool.query('INSERT INTO ca_itr (customer_id, ca_id) VALUES ?', [values]);
+
+    res.json({ message: 'Customers allotted to CA successfully' });
+  } catch (error) {
+    console.error('Error allotting customers to CA:', error);
+    res.status(500).json({ error: 'Failed to allot customers to CA' });
+  }
+});
+
+// Remove customer allotment from CA
+router.delete('/cas/:caId/allot-customers/:customerId', requireSuperadmin, async (req, res) => {
+  const { caId, customerId } = req.params;
+
+  try {
+    // Verify the allotment exists
+    const [rows] = await pool.query('SELECT id FROM ca_itr WHERE customer_id = ? AND ca_id = ?', [customerId, caId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Customer allotment not found' });
+    }
+
+    // Delete the allotment record
+    await pool.query('DELETE FROM ca_itr WHERE customer_id = ? AND ca_id = ?', [customerId, caId]);
+
+    res.json({ message: 'Customer allotment removed successfully' });
+  } catch (error) {
+    console.error('Error removing customer allotment:', error);
+    res.status(500).json({ error: 'Failed to remove customer allotment' });
   }
 });
 

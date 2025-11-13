@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import mysql from 'mysql2/promise';
 
 // MySQL connection config
@@ -10,25 +9,25 @@ const config = {
   port: 3306,
 };
 
-async function createSubadminTable() {
+async function createCaPermissionsTable() {
   const connection = await mysql.createConnection(config);
   try {
     const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS subadmin (
+      CREATE TABLE IF NOT EXISTS ca_permissions (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(255) NOT NULL UNIQUE,
-        password VARCHAR(255) NOT NULL,
-        issubadmin BOOLEAN DEFAULT TRUE,
-        isactive BOOLEAN DEFAULT TRUE
+        ca_id INT NOT NULL,
+        permission VARCHAR(255) NOT NULL,
+        FOREIGN KEY (ca_id) REFERENCES ca(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_ca_permission (ca_id, permission)
       );
     `;
     await connection.execute(createTableSQL);
-    console.log('Subadmin table created or already exists.');
+    console.log('CA permissions table created or already exists.');
   } catch (error) {
-    console.error('Error creating subadmin table:', error);
+    console.error('Error creating CA permissions table:', error);
   } finally {
     await connection.end();
   }
 }
 
-createSubadminTable();
+createCaPermissionsTable();
