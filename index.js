@@ -12,6 +12,7 @@ import assignedItrsRouter from './routes/assignedItrs.js';
 import paymentRoutes from './routes/payment.js';
 import superadminRoutes from './routes/superadmin.js';
 import messageRoutes from './routes/messages.js';
+// import agentRoutes from './routes/agent.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +54,7 @@ app.use('/api/assigned-itrs', assignedItrsRouter);
 app.use('/payment', paymentRoutes);
 app.use('/superadmin', superadminRoutes);
 app.use('/messages', messageRoutes);
+// app.use('/agent', agentRoutes);
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));

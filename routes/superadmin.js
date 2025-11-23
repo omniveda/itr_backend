@@ -24,11 +24,21 @@ const requireSuperadmin = (req, res, next) => {
   }
 };
 
-// Get all agents
+// Get all agents with their permissions
 router.get('/agents', requireSuperadmin, async (req, res) => {
   try {
-    const [agents] = await pool.query('SELECT id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, isagent, wbalance FROM agent');
-    res.json(agents);
+    const [agents] = await pool.query(`
+      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.wbalance,
+             ap.permissions
+      FROM agent a
+      LEFT JOIN agent_permissions ap ON a.id = ap.agent_id
+    `);
+    // Parse permissions JSON
+    const result = agents.map(agent => ({
+      ...agent,
+      permissions: agent.permissions ? JSON.parse(agent.permissions) : []
+    }));
+    res.json(result);
   } catch (error) {
     console.error('Error fetching agents:', error);
     res.status(500).json({ error: 'Failed to fetch agents' });
@@ -210,6 +220,26 @@ router.put('/subadmins/:id/permissions', requireSuperadmin, async (req, res) => 
       const values = permissions.map(permission => [id, permission]);
       await pool.query('INSERT INTO subadmin_permissions (subadmin_id, permission) VALUES ?', [values]);
     }
+
+    // Handle subadmin_permission_agent table for manage_agents permission
+    const hasManageAgents = permissions.includes('manage_agents');
+    if (hasManageAgents) {
+      // Get the permission id for manage_agents
+      const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [id, 'manage_agents']);
+      if (permRows.length > 0) {
+        const permId = permRows[0].id;
+        // Check if record already exists
+        const [existing] = await pool.query('SELECT id FROM subadmin_permission_agent WHERE subadmin_permissions_id = ?', [permId]);
+        if (existing.length === 0) {
+          // Insert new record with all fields set to 1
+          await pool.query('INSERT INTO subadmin_permission_agent (subadmin_permissions_id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, wbalance) VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0, 0)', [permId]);
+        }
+      }
+    } else {
+      // Delete any existing record for manage_agents
+      await pool.query('DELETE FROM subadmin_permission_agent WHERE subadmin_permissions_id IN (SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?)', [id, 'manage_agents']);
+    }
+
     res.json({ message: 'Subadmin permissions updated successfully' });
   } catch (error) {
     console.error('Error updating subadmin permissions:', error);
@@ -678,6 +708,78 @@ router.delete('/cas/:caId/allot-customers/:customerId', requireSuperadmin, async
   } catch (error) {
     console.error('Error removing customer allotment:', error);
     res.status(500).json({ error: 'Failed to remove customer allotment' });
+  }
+});
+
+// Get agent permissions
+router.get('/agents/:id/permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [permissions] = await pool.query('SELECT permissions FROM agent_permissions WHERE agent_id = ?', [id]);
+    res.json(permissions.length > 0 ? JSON.parse(permissions[0].permissions) : []);
+  } catch (error) {
+    console.error('Error fetching agent permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch agent permissions' });
+  }
+});
+
+// Update agent permissions
+router.put('/agents/:id/permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { permissions } = req.body; // array of permission strings
+  if (!Array.isArray(permissions)) {
+    return res.status(400).json({ error: 'Permissions must be an array' });
+  }
+  try {
+    // Delete existing permissions
+    await pool.query('DELETE FROM agent_permissions WHERE agent_id = ?', [id]);
+    // Insert new permissions
+    if (permissions.length > 0) {
+      await pool.query('INSERT INTO agent_permissions (agent_id, permissions) VALUES (?, ?)', [id, JSON.stringify(permissions)]);
+    }
+    res.json({ message: 'Agent permissions updated successfully' });
+  } catch (error) {
+    console.error('Error updating agent permissions:', error);
+    res.status(500).json({ error: 'Failed to update agent permissions' });
+  }
+});
+
+// Get subadmin agent permissions
+router.get('/subadmins/:id/agent-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT * FROM subadmin_permission_agent WHERE subadmin_permissions_id IN (SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?)', [id, 'manage_agents']);
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      res.json({ name: 0, father_name: 0, mobile_no: 0, mail_id: 0, address: 0, profile_photo: 0, alternate_mobile_no: 0, password: 0, wbalance: 0 });
+    }
+  } catch (error) {
+    console.error('Error fetching subadmin agent permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch subadmin agent permissions' });
+  }
+});
+
+// Update subadmin agent permissions
+router.put('/subadmins/:id/agent-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, wbalance } = req.body;
+  try {
+    const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [id, 'manage_agents']);
+    if (permRows.length === 0) {
+      return res.status(404).json({ error: 'Manage agents permission not found' });
+    }
+    const permId = permRows[0].id;
+    const [existing] = await pool.query('SELECT id FROM subadmin_permission_agent WHERE subadmin_permissions_id = ?', [permId]);
+    if (existing.length > 0) {
+      await pool.query('UPDATE subadmin_permission_agent SET name = ?, father_name = ?, mobile_no = ?, mail_id = ?, address = ?, profile_photo = ?, alternate_mobile_no = ?, password = ?, wbalance = ? WHERE subadmin_permissions_id = ?', [name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, wbalance, permId]);
+    } else {
+      await pool.query('INSERT INTO subadmin_permission_agent (subadmin_permissions_id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, wbalance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [permId, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, wbalance]);
+    }
+    res.json({ message: 'Subadmin agent permissions updated successfully' });
+  } catch (error) {
+    console.error('Error updating subadmin agent permissions:', error);
+    res.status(500).json({ error: 'Failed to update subadmin agent permissions' });
   }
 });
 

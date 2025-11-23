@@ -124,18 +124,22 @@ router.post('/login', async (req, res) => {
       });
     } else {
       // Agent login
+      console.log('Attempting agent login with mobile:', email);
       const [rows] = await pool.query('SELECT * FROM agent WHERE mobile_no = ?', [email]);
+      console.log('Agent query results:', rows.length ? 'Found' : 'Not found');
       if (rows.length === 0) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
       const agent = rows[0];
+      console.log('Found agent:', { id: agent.id, name: agent.name, isagent: agent.isagent });
       const isValidPassword = await bcrypt.compare(password, agent.password);
+      console.log('Password validation:', isValidPassword ? 'Success' : 'Failed');
       if (!isValidPassword) {
         return res.status(401).json({ message: 'Invalid credentials' });
       }
 
-      const token = jwt.sign({ id: agent.id, mobile_no: agent.mobile_no }, process.env.JWT_SECRET);
+      const token = jwt.sign({ id: agent.id, mobile_no: agent.mobile_no, isagent: agent.isagent }, process.env.JWT_SECRET);
       res.json({
         token,
         agent: {
