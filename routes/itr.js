@@ -23,7 +23,7 @@ const authenticateToken = (req, res, next) => {
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(`
-      SELECT itr.*, customer.name as customer_name, customer.pan_number as customer_pan
+      SELECT itr.*, customer.name as customer_name, customer.mobile_no as customer_mobile_no, customer.pan_number as customer_pan
       FROM itr
       JOIN customer ON itr.customer_id = customer.id
       WHERE itr.agent_id = ?
