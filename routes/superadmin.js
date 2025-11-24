@@ -221,23 +221,43 @@ router.put('/subadmins/:id/permissions', requireSuperadmin, async (req, res) => 
       await pool.query('INSERT INTO subadmin_permissions (subadmin_id, permission) VALUES ?', [values]);
     }
 
-    // Handle subadmin_permission_agent table for manage_agents permission
-    const hasManageAgents = permissions.includes('manage_agents');
+    // Handle subadmin_customer_permission table for manage_agents permission (customer fields)
+    console.log("permissions",permissions.includes('manage_itr'));
+    const hasManageAgents = permissions.includes('manage_itr');
     if (hasManageAgents) {
       // Get the permission id for manage_agents
+      const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [id, 'manage_itr']);
+      if (permRows.length > 0) {
+        const permId = permRows[0].id;
+        // Check if record already exists
+        const [existing] = await pool.query('SELECT id FROM Subadmin_customer_permission WHERE subadmin_permissions_id = ?', [permId]);
+        if (existing.length === 0) {
+          // Insert new record with all fields set to 0
+          await pool.query('INSERT INTO Subadmin_customer_permission (subadmin_permissions_id, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type) VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)', [permId]);
+        }
+      }
+    } else {
+      // Delete any existing record for manage_agents
+      await pool.query('DELETE FROM subadmin_customer_permission WHERE subadmin_permissions_id IN (SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?)', [id, 'manage_agents']);
+    }
+
+    // Handle subadmin_permission_agent table for manage_itr permission (agent fields)
+    const hasManageITR = permissions.includes('manage_agents');
+    if (hasManageITR) {
+      // Get the permission id for manage_itr
       const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [id, 'manage_agents']);
       if (permRows.length > 0) {
         const permId = permRows[0].id;
         // Check if record already exists
         const [existing] = await pool.query('SELECT id FROM subadmin_permission_agent WHERE subadmin_permissions_id = ?', [permId]);
         if (existing.length === 0) {
-          // Insert new record with all fields set to 1
+          // Insert new record with all fields set to 0
           await pool.query('INSERT INTO subadmin_permission_agent (subadmin_permissions_id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, wbalance) VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0, 0)', [permId]);
         }
       }
     } else {
-      // Delete any existing record for manage_agents
-      await pool.query('DELETE FROM subadmin_permission_agent WHERE subadmin_permissions_id IN (SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?)', [id, 'manage_agents']);
+      // Delete any existing record for manage_itr
+      await pool.query('DELETE FROM subadmin_permission_agent WHERE subadmin_permissions_id IN (SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?)', [id, 'manage_itr']);
     }
 
     res.json({ message: 'Subadmin permissions updated successfully' });
@@ -438,6 +458,25 @@ router.put('/cas/:id/permissions', requireSuperadmin, async (req, res) => {
       const values = permissions.map(permission => [id, permission]);
       await pool.query('INSERT INTO ca_permissions (ca_id, permission) VALUES ?', [values]);
     }
+
+    // Handle ca_customer_permission table for manage_itr permission
+    if (permissions.includes('manage_itr')) {
+      // Get the permission id for manage_itr
+      const [permRows] = await pool.query('SELECT id FROM ca_permissions WHERE ca_id = ? AND permission = ?', [id, 'manage_itr']);
+      if (permRows.length > 0) {
+        const permId = permRows[0].id;
+        // Check if record already exists
+        const [existing] = await pool.query('SELECT id FROM ca_customer_permission WHERE ca_permissions_id = ?', [permId]);
+        if (existing.length === 0) {
+          // Insert new record with all fields set to 0
+          await pool.query('INSERT INTO ca_customer_permission (ca_permissions_id, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type) VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)', [permId]);
+        }
+      }
+    } else {
+      // Delete any existing record for manage_itr
+      await pool.query('DELETE FROM ca_customer_permission WHERE ca_permissions_id IN (SELECT id FROM ca_permissions WHERE ca_id = ? AND permission = ?)', [id, 'manage_itr']);
+    }
+
     res.json({ message: 'CA permissions updated successfully' });
   } catch (error) {
     console.error('Error updating CA permissions:', error);
@@ -780,6 +819,84 @@ router.put('/subadmins/:id/agent-permissions', requireSuperadmin, async (req, re
   } catch (error) {
     console.error('Error updating subadmin agent permissions:', error);
     res.status(500).json({ error: 'Failed to update subadmin agent permissions' });
+  }
+});
+
+// Get subadmin customer permissions
+router.get('/subadmins/:id/customer-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT * FROM Subadmin_customer_permission WHERE subadmin_permissions_id IN (SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?)', [id, 'manage_itr']);
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      res.json({ name: 0, father_name: 0, dob: 0, pan_number: 0, adhar_number: 0, account_number: 0, bank_name: 0, ifsc_code: 0, tds_amount: 0, itr_password: 0, asst_year_3yr: 0, income_type: 0, mobile_no: 0, mail_id: 0, filling_type: 0, last_ay_income: 0, profile_photo: 0, user_id: 0, password: 0, attachments_1: 0, attachments_2: 0, attachments_3: 0, attachments_4: 0, attachments_5: 0, file_charge: 0, apply_date: 0, updated_date: 0, income_slab: 0, comment_box: 0, customer_type: 0 });
+    }
+  } catch (error) {
+    console.error('Error fetching subadmin customer permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch subadmin customer permissions' });
+  }
+});
+
+// Update subadmin customer permissions
+router.put('/subadmins/:id/customer-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type } = req.body;
+  try {
+    const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [id, 'manage_itr']);
+    if (permRows.length === 0) {
+      return res.status(404).json({ error: 'Manage agents permission not found' });
+    }
+    const permId = permRows[0].id;
+    const [existing] = await pool.query('SELECT id FROM subadmin_customer_permission WHERE subadmin_permissions_id = ?', [permId]);
+    if (existing.length > 0) {
+      await pool.query('UPDATE Subadmin_customer_permission SET name = ?, father_name = ?, dob = ?, pan_number = ?, adhar_number = ?, account_number = ?, bank_name = ?, ifsc_code = ?, tds_amount = ?, itr_password = ?, asst_year_3yr = ?, income_type = ?, mobile_no = ?, mail_id = ?, filling_type = ?, last_ay_income = ?, profile_photo = ?, user_id = ?, password = ?, attachments_1 = ?, attachments_2 = ?, attachments_3 = ?, attachments_4 = ?, attachments_5 = ?, file_charge = ?, apply_date = ?, updated_date = ?, income_slab = ?, comment_box = ?, customer_type = ? WHERE subadmin_permissions_id = ?', [name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type, permId]);
+    } else {
+      await pool.query('INSERT INTO Subadmin_customer_permission (subadmin_permissions_id, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [permId, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type]);
+    }
+    res.json({ message: 'Subadmin customer permissions updated successfully' });
+  } catch (error) {
+    console.error('Error updating subadmin customer permissions:', error);
+    res.status(500).json({ error: 'Failed to update subadmin customer permissions' });
+  }
+});
+
+// Get CA customer permissions
+router.get('/cas/:id/customer-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT * FROM ca_customer_permission WHERE ca_permissions_id IN (SELECT id FROM ca_permissions WHERE ca_id = ? AND permission = ?)', [id, 'manage_itr']);
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      res.json({ name: 0, father_name: 0, dob: 0, pan_number: 0, adhar_number: 0, account_number: 0, bank_name: 0, ifsc_code: 0, tds_amount: 0, itr_password: 0, asst_year_3yr: 0, income_type: 0, mobile_no: 0, mail_id: 0, filling_type: 0, last_ay_income: 0, profile_photo: 0, user_id: 0, password: 0, attachments_1: 0, attachments_2: 0, attachments_3: 0, attachments_4: 0, attachments_5: 0, file_charge: 0, apply_date: 0, updated_date: 0, income_slab: 0, comment_box: 0, customer_type: 0 });
+    }
+  } catch (error) {
+    console.error('Error fetching CA customer permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch CA customer permissions' });
+  }
+});
+
+// Update CA customer permissions
+router.put('/cas/:id/customer-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type } = req.body;
+  try {
+    const [permRows] = await pool.query('SELECT id FROM ca_permissions WHERE ca_id = ? AND permission = ?', [id, 'manage_itr']);
+    if (permRows.length === 0) {
+      return res.status(404).json({ error: 'Manage ITR permission not found' });
+    }
+    const permId = permRows[0].id;
+    const [existing] = await pool.query('SELECT id FROM ca_customer_permission WHERE ca_permissions_id = ?', [permId]);
+    if (existing.length > 0) {
+      await pool.query('UPDATE ca_customer_permission SET name = ?, father_name = ?, dob = ?, pan_number = ?, adhar_number = ?, account_number = ?, bank_name = ?, ifsc_code = ?, tds_amount = ?, itr_password = ?, asst_year_3yr = ?, income_type = ?, mobile_no = ?, mail_id = ?, filling_type = ?, last_ay_income = ?, profile_photo = ?, user_id = ?, password = ?, attachments_1 = ?, attachments_2 = ?, attachments_3 = ?, attachments_4 = ?, attachments_5 = ?, file_charge = ?, apply_date = ?, updated_date = ?, income_slab = ?, comment_box = ?, customer_type = ? WHERE ca_permissions_id = ?', [name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type, permId]);
+    } else {
+      await pool.query('INSERT INTO ca_customer_permission (ca_permissions_id, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [permId, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type, last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3, attachments_4, attachments_5, file_charge, apply_date, updated_date, income_slab, comment_box, customer_type]);
+    }
+    res.json({ message: 'CA customer permissions updated successfully' });
+  } catch (error) {
+    console.error('Error updating CA customer permissions:', error);
+    res.status(500).json({ error: 'Failed to update CA customer permissions' });
   }
 });
 
