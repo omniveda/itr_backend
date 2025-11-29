@@ -116,6 +116,7 @@ router.post('/with-payment', authenticateToken, upload.fields([
   }
 
   const amount = parseFloat(customerData.file_charge || 0);
+  console.log('Processing wallet payment of amount:', amount);
   if (!amount || amount <= 0) {
     return res.status(400).json({ message: 'Valid file charge is required' });
   }

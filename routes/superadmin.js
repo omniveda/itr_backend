@@ -502,7 +502,7 @@ router.put('/cas/:id/status', requireSuperadmin, async (req, res) => {
     console.error('Error updating CA status:', error);
     res.status(500).json({ error: 'Failed to update CA status' });
   }
-});
+}); 
 
 // Get all customers with assignment status
 router.get('/customers', requireSuperadmin, async (req, res) => {
@@ -897,6 +897,54 @@ router.put('/cas/:id/customer-permissions', requireSuperadmin, async (req, res) 
   } catch (error) {
     console.error('Error updating CA customer permissions:', error);
     res.status(500).json({ error: 'Failed to update CA customer permissions' });
+  }
+});
+
+// Get flow data for superadmin
+router.get('/flow', requireSuperadmin, async (req, res) => {
+  try {
+    const [flows] = await pool.query(`
+      SELECT 
+        itr.customer_id,
+        customer.name as customer_name,
+        itr.agent_id,
+        agent.name as agent_name,
+        subadmin_itr.subadmin_id,
+        subadmin.username as subadmin_username,
+        ca_itr.ca_id,
+        ca.name as ca_name
+      FROM itr
+      LEFT JOIN customer ON itr.customer_id = customer.id
+      LEFT JOIN agent ON itr.agent_id = agent.id
+      LEFT JOIN subadmin_itr ON itr.customer_id = subadmin_itr.customer_id
+      LEFT JOIN subadmin ON subadmin_itr.subadmin_id = subadmin.id
+      LEFT JOIN ca_itr ON itr.customer_id = ca_itr.customer_id
+      LEFT JOIN ca ON ca_itr.ca_id = ca.id
+    `);
+
+    // Filter out null values for subadmin and ca
+    const result = flows.map(flow => {
+      const filteredFlow = {
+        customer_id: flow.customer_id,
+        customer_name: flow.customer_name,
+        agent_id: flow.agent_id,
+        agent_name: flow.agent_name
+      };
+      if (flow.subadmin_id) {
+        filteredFlow.subadmin_id = flow.subadmin_id;
+        filteredFlow.subadmin_username = flow.subadmin_username;
+      }
+      if (flow.ca_id) {
+        filteredFlow.ca_id = flow.ca_id;
+        filteredFlow.ca_name = flow.ca_name;
+      }
+      return filteredFlow;
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching flow data:', error);
+    res.status(500).json({ error: 'Failed to fetch flow data' });
   }
 });
 
