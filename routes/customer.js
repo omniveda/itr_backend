@@ -83,15 +83,15 @@ router.post('/', authenticateToken, upload.fields([
     const [result] = await pool.query(
       `INSERT INTO customer (
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-        tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
+        tds_amount, itr_password, income_type, mobile_no, mail_id, filling_type,
         last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3,
-        attachments_4, attachments_5, file_charge, income_slab, comment_box, customer_type, agent_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        attachments_4, attachments_5, income_slab, comment_box, customer_type, agent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-        tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
+        tds_amount, itr_password, income_type, mobile_no, mail_id, filling_type,
         last_ay_income, profile_photo, user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
-        attachments.attachments_4, attachments.attachments_5, file_charge, income_slab, comment_box, customer_type, req.agentId
+        attachments.attachments_4, attachments.attachments_5, income_slab, comment_box, customer_type, req.agentId
       ]
     );
     res.status(201).json({ message: 'Customer added successfully', customerId: result.insertId });
@@ -168,15 +168,15 @@ router.post('/with-payment', authenticateToken, upload.fields([
     const [customerResult] = await pool.query(
       `INSERT INTO customer (
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-        tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
+        tds_amount, itr_password, income_type, mobile_no, mail_id, filling_type,
         last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3,
-        attachments_4, attachments_5, file_charge, income_slab, comment_box, customer_type, agent_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        attachments_4, attachments_5, income_slab, comment_box, customer_type, agent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customerData.name, customerData.father_name, customerData.dob, customerData.pan_number, customerData.adhar_number, customerData.account_number, customerData.bank_name, customerData.ifsc_code,
-        customerData.tds_amount, customerData.itr_password, customerData.asst_year_3yr, customerData.income_type, customerData.mobile_no, customerData.mail_id, customerData.filling_type,
+        customerData.tds_amount, customerData.itr_password, customerData.income_type, customerData.mobile_no, customerData.mail_id, customerData.filling_type,
         customerData.last_ay_income, customerData.profile_photo, customerData.user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
-        attachments.attachments_4, attachments.attachments_5, customerData.file_charge, customerData.income_slab, customerData.comment_box, customerData.customer_type, req.agentId
+        attachments.attachments_4, attachments.attachments_5, customerData.income_slab, customerData.comment_box, customerData.customer_type, req.agentId
       ]
     );
 
@@ -370,13 +370,14 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
       entry.asstYear,
       req.agentId,
       false, // agentedit
-      'Pending' // status
+      'Pending', // status,
+      0 // subadmin_send
     ]);
-    const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?)').join(',');
+    const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?, ?)').join(',');
     const flatValues = values.flat();
 
     await pool.query(
-      `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status) VALUES ${placeholdersInsert}`,
+      `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status, subadmin_send) VALUES ${placeholdersInsert}`,
       flatValues
     );
 
