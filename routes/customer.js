@@ -207,6 +207,7 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN payment p ON c.id = p.customer_id AND c.agent_id = p.agent_id
       WHERE c.agent_id = ?
     `, [req.agentId]);
+    console.log('Fetched customers:', rows);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching customers:', error);
@@ -371,7 +372,7 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
       req.agentId,
       false, // agentedit
       'Pending', // status,
-      0 // subadmin_send
+      1 // subadmin_send
     ]);
     const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?, ?)').join(',');
     const flatValues = values.flat();
@@ -396,7 +397,7 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Error sending customers to subadmin:', error);
-    res.status(500).json({ message: 'Failed to send customers to subadmin' });
+    res.status(500).json({ message: '' });
   }
 });
 
