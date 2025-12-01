@@ -149,4 +149,54 @@ router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/subadmin/assign-ca/:customerId
+// Assign or update CA for a specific customer
+router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
+  const { customerId } = req.params;
+  const { caId } = req.body;
+
+  if (!caId) {
+    return res.status(400).json({ message: 'CA ID is required' });
+  }
+  
+  try {
+    // Check if the customer exists in subadmin_itr for this subadmin and get agent_id
+    const [customerRows] = await pool.query(`
+      SELECT si.customer_id, i.agent_id
+      FROM subadmin_itr si
+      JOIN itr i ON si.customer_id = i.customer_id
+      WHERE si.customer_id = ? AND si.subadmin_id = ?
+    `, [customerId, req.subadminId]);
+
+    console.log('Rows data', customerRows);
+    if (customerRows.length === 0) {
+      return res.status(404).json({ message: 'Customer not found or not accessible' });
+    }
+
+    const agentId = customerRows[0].agent_id;
+
+    // Update the ca_id and ca_send in itr table for this customer
+    await pool.query('UPDATE itr SET ca_id = ?, ca_send = TRUE WHERE customer_id = ?', [caId, customerId]);
+
+    // Delete the last record for this customer_id if it exists
+    await pool.query(`
+      DELETE FROM ca_itr
+      WHERE customer_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `, [customerId]);
+
+    // Insert the new record into the ca_itr table
+    await pool.query(`
+      INSERT INTO ca_itr (customer_id, ca_id)
+      VALUES (?, ?)
+    `, [customerId, caId]);
+
+    res.json({ message: 'CA assigned successfully' });
+  } catch (error) {
+    console.error('Error assigning CA:', error);
+    res.status(500).json({ message: 'Failed to assign CA' });
+  }
+});
+
 export default router;
