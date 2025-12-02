@@ -51,6 +51,7 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   const { email, password, subadmin, ca, superadmin } = req.body;
+  console.log('Login request received:', { email, subadmin, ca, superadmin });
   if (!email || !password) {
     return res.status(400).json({ message: 'Mobile number/username and password are required' });
   }
@@ -180,7 +181,7 @@ router.get('/me', async (req, res) => {
       }
       res.json({ superadmin: { ...rows[0], issuperadmin: true } });
     } else if (decoded.isCA) {
-      const [rows] = await pool.query('SELECT id, username, name, email FROM ca WHERE id = ?', [decoded.id]);
+      const [rows] = await pool.query('SELECT id, username, name, email, isca FROM ca WHERE id = ?', [decoded.id]);
       if (rows.length === 0) {
         return res.status(404).json({ message: 'CA not found' });
       }

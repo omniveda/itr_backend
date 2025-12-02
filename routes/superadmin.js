@@ -627,7 +627,7 @@ router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
 router.get('/itrs', requireSuperadmin, async (req, res) => {
   try {
     const [itrs] = await pool.query(`
-      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at
+      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.ca_upload, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.otp_check
       FROM itr
       LEFT JOIN customer ON itr.customer_id = customer.id
     `);
@@ -672,6 +672,22 @@ router.post('/subadmins/allot-customers', requireSuperadmin, async (req, res) =>
     res.status(500).json({ error: 'Failed to allot customers to subadmin' });
   }
 });
+
+router.put('/otp-check/:itrId', requireSuperadmin, async (req, res) => {
+  const { itrId } = req.params;
+  try {
+    console.log("Updating OTP check for ITR ID:", itrId);  
+    const [result] = await pool.query('UPDATE itr SET otp_check=TRUE, status="Completed" WHERE id=?', [itrId]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'ITR not found' });
+    }
+    res.json({ message: 'OTP check updated successfully' }); // Add this
+  } catch (error) {
+    console.error('Error updating OTP check status:', error);
+    return res.status(500).json({ error: 'Failed to update OTP check status' });
+  }
+});
+
 
 // Remove customer allotment from subadmin
 router.delete('/subadmins/:subadminId/allot-customers/:customerId', requireSuperadmin, async (req, res) => {

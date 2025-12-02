@@ -1,20 +1,99 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { pool } from '../db.js';
 const router = express.Router();
-// Get all ITRs assigned to a CA
-router.get('/assigned-itrs/:caId', async (req, res) => {
-  const { caId } = req.params;
+
+// Middleware to verify JWT token and check if user is CA
+const authenticateCA = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1] || req.headers['x-auth-token'];
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
   try {
-    const [rows] = await pool.query(`
-      SELECT ca_itr.customer_id, ca_itr.agent_id, ca_itr.subadmin_id,
-        c.name AS customer_name, c.pan_number, c.mobile_no AS customer_mobile, c.mail_id AS customer_email, c.dob,
-        a.name AS agent_name, a.mobile_no AS agent_mobile
-      FROM ca_itr
-      JOIN customer c ON ca_itr.customer_id = c.id
-      JOIN agent a ON ca_itr.agent_id = a.id
-      WHERE ca_itr.ca_id = ?
-      ORDER BY ca_itr.date DESC
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded.isCA) {
+      return res.status(403).json({ message: 'Access denied. CA privileges required.' });
+    }
+    req.caId = decoded.id;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+};
+// Get all ITRs assigned to a CA with customer data filtered by permissions
+router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
+  const caId = req.caId;
+  try {
+
+    const [permRows] = await pool.query(`
+      SELECT ccp.* FROM ca_customer_permission ccp
+      JOIN ca_permissions cp ON ccp.ca_permissions_id = cp.id
+      WHERE cp.ca_id = ?
     `, [caId]);
+
+    if (permRows.length === 0) {
+      return res.status(404).json({ message: 'No permissions found for this CA' });
+    }
+
+    const permissions = permRows[0];
+    console.log('CA Permissions:', permissions);
+
+    // Build dynamic SELECT fields for ITR and customer
+    let selectFields = [
+      'itr.id AS itr_id',
+      'itr.asst_year AS itr_asst_year',
+      'itr.status AS itr_status',
+      'itr.created_at AS itr_created_at',
+      'itr.updated_at AS itr_updated_at',
+      'itr.customer_id',
+      'itr.ca_upload AS itr_ca_upload',
+    ];
+
+    // Add customer fields if permitted
+    const customerFieldMap = {
+      name: 'c.name AS customer_name',
+      father_name: 'c.father_name AS customer_father_name',
+      dob: 'c.dob AS customer_dob',
+      pan_number: 'c.pan_number AS customer_pan_number',
+      adhar_number: 'c.adhar_number AS customer_adhar_number',
+      account_number: 'c.account_number AS customer_account_number',
+      bank_name: 'c.bank_name AS customer_bank_name',
+      ifsc_code: 'c.ifsc_code AS customer_ifsc_code',
+      mobile_no: 'c.mobile_no AS customer_mobile',
+      mail_id: 'c.mail_id AS customer_email',
+      tds_amount: 'c.tds_amount AS customer_tds_amount',
+      itr_passowrd: 'c.itr_password AS customer_itr_password',
+      income_type: 'c.income_type AS customer_income_type',
+      filling_type: 'c.filling_type AS customer_filling_type',
+      last_ay_income: 'c.last_ay_income AS customer_last_ay_income',
+      profile_photo: 'c.profile_photo AS customer_profile_photo',
+      attachments_1: 'c.attachments_1 AS customer_attachment_1',
+      attachments_2: 'c.attachments_2 AS customer_attachment_2',
+      attachments_3: 'c.attachments_3 AS customer_attachment_3',
+      attachments_4: 'c.attachments_4 AS customer_attachment_4',
+      attachments_5: 'c.attachments_5 AS customer_attachment_5',
+      comment_box: 'c.comment_box AS customer_comment_box',
+    };
+
+    for (const [permField, sqlField] of Object.entries(customerFieldMap)) {
+      if (permissions[permField] === 1) {
+        selectFields.push(sqlField);
+      }
+    }
+
+    const selectClause = selectFields.join(', ');
+
+    const query = `
+      SELECT ${selectClause}
+      FROM ca_itr
+      JOIN itr ON ca_itr.customer_id = itr.customer_id
+      JOIN customer c ON ca_itr.customer_id = c.id
+      JOIN agent a ON itr.agent_id = a.id
+      WHERE ca_itr.ca_id = ?
+    `;
+
+    const [rows] = await pool.query(query, [caId]);
+    console.log('Fetching assigned ITRs for CA ID:', rows);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching assigned ITRs for CA:', error);
