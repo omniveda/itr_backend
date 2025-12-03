@@ -107,9 +107,9 @@ router.get('/customers-itr', authenticateToken, async (req, res) => {
       SELECT itr.*, customer.*
       FROM itr
       JOIN customer ON itr.customer_id = customer.id
-      JOIN subadmin_itr si ON customer.id = si.customer_id
       ORDER BY itr.id DESC
     `);
+    console.log('subadmin data ony',rows);
 
     res.json({ data: rows, permissions });
   } catch (error) {
@@ -162,11 +162,9 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
   try {
     // Check if the customer exists in subadmin_itr for this subadmin and get agent_id
     const [customerRows] = await pool.query(`
-      SELECT si.customer_id, i.agent_id
-      FROM subadmin_itr si
-      JOIN itr i ON si.customer_id = i.customer_id
-      WHERE si.customer_id = ? AND si.subadmin_id = ?
-    `, [customerId, req.subadminId]);
+      SELECT itr.customer_id, itr.agent_id
+      FROM itr WHERE itr.customer_id = ? AND itr.subadmin_send = ?
+    `, [customerId, 1]);
 
     console.log('Rows data', customerRows);
     if (customerRows.length === 0) {

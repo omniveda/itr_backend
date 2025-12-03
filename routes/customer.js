@@ -208,9 +208,12 @@ router.post('/with-payment', authenticateToken, upload.fields([
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(`
-      SELECT c.*, CASE WHEN p.paid = 1 THEN 1 ELSE 0 END AS paid
+      SELECT c.*,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM payment p
+               WHERE p.customer_id = c.id AND p.agent_id = c.agent_id AND p.paid = 1
+             ) THEN 1 ELSE 0 END AS paid
       FROM customer c
-      LEFT JOIN payment p ON c.id = p.customer_id AND c.agent_id = p.agent_id
       WHERE c.agent_id = ?
     `, [req.agentId]);
     console.log('Fetched customers:', rows);
@@ -306,7 +309,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
 // Send selected customers to subadmin with assessment year
 router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
-  const { customersWithYears } = req.body;
+  const { customersWithYears, subadmin_id } = req.body;
 
   if (!customersWithYears || !Array.isArray(customersWithYears) || customersWithYears.length === 0) {
     return res.status(400).json({ message: 'Customers with years are required' });
@@ -388,12 +391,15 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
       flatValues
     );
 
-    // Update subadmin_send to true for sent customers
+    // Insert into subadmin_itr table for sent customers
     const newCustomerIds = newEntries.map(entry => entry.customerId);
-    const updatePlaceholders = newCustomerIds.map(() => '?').join(',');
+    const subadminValues = newCustomerIds.map(id => [id, subadmin_id]);
+    const subadminPlaceholders = subadminValues.map(() => '(?, ?)').join(',');
+    const subadminFlatValues = subadminValues.flat();
+    console.log("subadmin place holder and subadmin flat values",subadminPlaceholders, subadminFlatValues);
     await pool.query(
-      `UPDATE customer SET subadmin_send = TRUE WHERE id IN (${updatePlaceholders}) AND agent_id = ?`,
-      [...newCustomerIds, req.agentId]
+      `INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ${subadminPlaceholders}`,
+      subadminFlatValues
     );
 
     res.json({
