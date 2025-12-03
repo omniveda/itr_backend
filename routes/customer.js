@@ -97,6 +97,9 @@ router.post('/', authenticateToken, upload.fields([
     res.status(201).json({ message: 'Customer added successfully', customerId: result.insertId });
   } catch (error) {
     console.error('Error adding customer:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ message: 'PAN number already exists. Please use a unique PAN number.' });
+    }
     res.status(500).json({ message: 'Failed to add customer' });
   }
 });
@@ -193,6 +196,9 @@ router.post('/with-payment', authenticateToken, upload.fields([
   } catch (error) {
     await pool.query('ROLLBACK');
     console.error('Error adding customer with payment:', error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ message: 'PAN number already exists. Please use a unique PAN number.' });
+    }
     res.status(500).json({ message: 'Failed to add customer and process payment' });
   }
 });

@@ -28,7 +28,7 @@ const requireSuperadmin = (req, res, next) => {
 router.get('/agents', requireSuperadmin, async (req, res) => {
   try {
     const [agents] = await pool.query(`
-      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.wbalance,
+      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.file_charge, a.wbalance,
              ap.permissions
       FROM agent a
       LEFT JOIN agent_permissions ap ON a.id = ap.agent_id
@@ -42,6 +42,22 @@ router.get('/agents', requireSuperadmin, async (req, res) => {
   } catch (error) {
     console.error('Error fetching agents:', error);
     res.status(500).json({ error: 'Failed to fetch agents' });
+  }
+});
+
+router.put('/agents/:id/file-charge',requireSuperadmin, async (req, res) => {
+  const {id}=req.params;
+  const {fileCharge}=req.body;
+  try{
+    const [rows]=await pool.query('SELECT id FROM agent WHERE id=?',[id]);
+    if(rows.length===0){
+      return res.status(404).json({error:'Agent not found'});
+    }
+    console.log(fileCharge);
+    await pool.query('UPDATE agent SET file_charge=? WHERE id=?',[fileCharge,id]);
+    res.json({ message: `Agent ${fileCharge} file charge successfully set` });
+  }catch{
+    res.status(500).json({error:'Failed to update agent'});
   }
 });
 
