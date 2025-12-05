@@ -55,7 +55,8 @@ router.post('/', authenticateToken, upload.fields([
   { name: 'attachments_2', maxCount: 1 },
   { name: 'attachments_3', maxCount: 1 },
   { name: 'attachments_4', maxCount: 1 },
-  { name: 'attachments_5', maxCount: 1 }
+  { name: 'attachments_5', maxCount: 1 },
+  { name: 'attachments_6', maxCount: 1 }
 ]), async (req, res) => {
   const {
     name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
@@ -72,7 +73,7 @@ router.post('/', authenticateToken, upload.fields([
 
     // Get uploaded file paths
     const attachments = {};
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       if (req.files && req.files[`attachments_${i}`] && req.files[`attachments_${i}`][0]) {
         attachments[`attachments_${i}`] = req.files[`attachments_${i}`][0].filename;
       } else {
@@ -85,13 +86,13 @@ router.post('/', authenticateToken, upload.fields([
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
         tds_amount, itr_password, income_type, mobile_no, mail_id, filling_type,
         last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3,
-        attachments_4, attachments_5, income_slab, comment_box, customer_type, agent_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        attachments_4, attachments_5, attachments_6, income_slab, comment_box, customer_type, agent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
         tds_amount, itr_password, income_type, mobile_no, mail_id, filling_type,
         last_ay_income, profile_photo, user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
-        attachments.attachments_4, attachments.attachments_5, income_slab, comment_box, customer_type, req.agentId
+        attachments.attachments_4, attachments.attachments_5, attachments.attachments_6, income_slab, comment_box, customer_type, req.agentId
       ]
     );
     res.status(201).json({ message: 'Customer added successfully', customerId: result.insertId });
@@ -110,7 +111,8 @@ router.post('/with-payment', authenticateToken, upload.fields([
   { name: 'attachments_2', maxCount: 1 },
   { name: 'attachments_3', maxCount: 1 },
   { name: 'attachments_4', maxCount: 1 },
-  { name: 'attachments_5', maxCount: 1 }
+  { name: 'attachments_5', maxCount: 1 },
+  { name: 'attachments_6', maxCount: 1 }
 ]), async (req, res) => {
   const { paymentMethod, ...customerData } = req.body;
 
@@ -245,14 +247,15 @@ router.put('/:id', authenticateToken, upload.fields([
   { name: 'attachments_2', maxCount: 1 },
   { name: 'attachments_3', maxCount: 1 },
   { name: 'attachments_4', maxCount: 1 },
-  { name: 'attachments_5', maxCount: 1 }
+  { name: 'attachments_5', maxCount: 1 },
+  { name: 'attachments_6', maxCount: 1 }
 ]), async (req, res) => {
   const { id } = req.params;
   const updates = req.body || {};
 
   // Handle file uploads
   const attachments = {};
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= 6; i++) {
     if (req.files && req.files[`attachments_${i}`] && req.files[`attachments_${i}`][0]) {
       attachments[`attachments_${i}`] = req.files[`attachments_${i}`][0].filename;
     }
