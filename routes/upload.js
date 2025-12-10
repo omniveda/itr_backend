@@ -40,9 +40,9 @@ router.post('/image', upload.single('file'), (req, res) => {
   streamifier.createReadStream(req.file.buffer).pipe(stream);
 });
 
-router.post('/ca-assessment', upload.single('file'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ message: 'No file uploaded' });
+router.post('/ca-assessment', upload.array('files', 3), async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ message: 'No files uploaded' });
   }
 
   const { customer_id, ca_id } = req.body;
@@ -51,9 +51,7 @@ router.post('/ca-assessment', upload.single('file'), async (req, res) => {
   }
 
   try {
-    // Create unique filename
-    const fileName = `ca_assessment_${customer_id}_${Date.now()}.pdf`;
-    const filePath = path.join(process.cwd(), 'backend', 'uploads', fileName);
+    const fileUrls = [];
 
     // Ensure uploads directory exists
     const uploadsDir = path.join(process.cwd(), 'backend', 'uploads');
@@ -61,16 +59,31 @@ router.post('/ca-assessment', upload.single('file'), async (req, res) => {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
 
-    // Write file to local system
-    fs.writeFileSync(filePath, req.file.buffer);
+    // Process each uploaded file
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const fileName = `ca_assessment_${customer_id}_${i + 1}_${Date.now()}.pdf`;
+      const filePath = path.join(uploadsDir, fileName);
 
-    // Create URL for accessing the file
-    const fileUrl = `http://localhost:3000/backend/uploads/${fileName}`;
+      // Write file to local system
+      fs.writeFileSync(filePath, file.buffer);
 
-    // Update the itr table with ca_upload URL and status
-    await pool.query('UPDATE itr SET ca_upload = ?, status = ?, superadmin_send = ? WHERE customer_id = ?', [fileUrl, 'In Progress',1, customer_id]);
+      // Create URL for accessing the file
+      const fileUrl = `http://localhost:3000/backend/uploads/${fileName}`;
+      fileUrls.push(fileUrl);
+    }
 
-    res.json({ message: 'Assessment uploaded successfully', url: fileUrl });
+    // Update the itr table with the three CA doc URLs and status
+    await pool.query('UPDATE itr SET Ca_doc1 = ?, Ca_doc2 = ?, Ca_doc3 = ?, status = ?, superadmin_send = ? WHERE customer_id = ?', [
+      fileUrls[0] || null,
+      fileUrls[1] || null,
+      fileUrls[2] || null,
+      'E-verification',
+      1,
+      customer_id
+    ]);
+
+    res.json({ message: 'Assessments uploaded successfully', urls: fileUrls });
   } catch (error) {
     console.error('File upload error:', error);
     res.status(500).json({ message: 'File upload failed' });

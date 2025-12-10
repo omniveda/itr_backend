@@ -56,8 +56,8 @@ app.use('/superadmin', superadminRoutes);
 app.use('/messages', messageRoutes);
 // app.use('/agent', agentRoutes);
 
-// Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// Serve static files from backend/uploads directory
+app.use('/backend/uploads', express.static(path.join(process.cwd(), 'backend', 'uploads')));
 
 initDb().then(() => {
   app.listen(PORT, () => {

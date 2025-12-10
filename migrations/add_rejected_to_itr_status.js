@@ -13,7 +13,7 @@ async function addRejectedToITRStatus() {
   const connection = await mysql.createConnection(config);
   try {
     const alterStatusSQL = `
-      ALTER TABLE itr MODIFY COLUMN status ENUM('Pending', 'In Progress', 'Completed', 'Rejected') DEFAULT 'Pending';
+      ALTER TABLE itr MODIFY COLUMN status ENUM('Pending', 'In Progress', 'Completed', 'Rejected', 'E-verification') DEFAULT 'Pending';
     `;
     await connection.execute(alterStatusSQL);
     console.log('Added "Rejected" to status ENUM in ITR table.');

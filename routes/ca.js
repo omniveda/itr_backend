@@ -46,7 +46,9 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
       'itr.created_at AS itr_created_at',
       'itr.updated_at AS itr_updated_at',
       'itr.customer_id',
-      'itr.ca_upload AS itr_ca_upload',
+      'itr.Ca_doc1 AS itr_ca_doc1',
+      'itr.Ca_doc2 AS itr_ca_doc2',
+      'itr.Ca_doc3 AS itr_ca_doc3',
     ];
 
     // Add customer fields if permitted
