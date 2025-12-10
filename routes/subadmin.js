@@ -135,19 +135,19 @@ router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
     const [rows] = await pool.query(`
       SELECT itr.id, itr.agentedit
       FROM itr
-      JOIN subadmin_itr si ON itr.customer_id = si.customer_id
-      WHERE itr.id = ? AND si.subadmin_id = ?
-    `, [itrId, req.subadminId]);
-    console.log('ITR rows for toggle-agentedit: itrId',itrId,"req.subadminId", req.subadminId );
-
+      WHERE itr.customer_id = ?
+    `, [itrId]);
+    // console.log('ITR rows for toggle-agentedit: itrId',itrId,"req.subadminId", req.subadminId );
+   
     if (rows.length === 0) {
       return res.status(404).json({ message: 'ITR not found or not accessible' });
     }
 
     const currentAgentEdit = rows[0].agentedit;
     const newAgentEdit = currentAgentEdit ? 0 : 1;
+    // console.log("Rows data", rows.id);
 
-    await pool.query('UPDATE itr SET agentedit = ? WHERE id = ?', [newAgentEdit, itrId]);
+    await pool.query('UPDATE itr SET agentedit = ? WHERE customer_id = ?', [newAgentEdit, itrId]);
 
     res.json({ message: 'Agent edit toggled successfully', agentedit: newAgentEdit });
   } catch (error) {
