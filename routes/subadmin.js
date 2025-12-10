@@ -253,6 +253,8 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
     // Update the ca_id and ca_send in itr table for this customer
     await pool.query('UPDATE itr SET ca_id = ?, ca_send = TRUE WHERE customer_id = ?', [caId, customerId]);
 
+    await pool.query('UPDATE itr SET status = "In Progress" WHERE customer_id = ?',[customerId]);
+
     // Delete the last record for this customer_id if it exists
     await pool.query(`
       DELETE FROM ca_itr

@@ -643,7 +643,7 @@ router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
 router.get('/itrs', requireSuperadmin, async (req, res) => {
   try {
     const [itrs] = await pool.query(`
-      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.ca_upload, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.otp_check
+      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check
       FROM itr
       LEFT JOIN customer ON itr.customer_id = customer.id
     `);

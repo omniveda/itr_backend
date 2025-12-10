@@ -59,6 +59,8 @@ app.use('/messages', messageRoutes);
 // Serve static files from backend/uploads directory
 app.use('/backend/uploads', express.static(path.join(process.cwd(), 'backend', 'uploads')));
 
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
