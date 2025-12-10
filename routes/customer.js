@@ -264,6 +264,9 @@ router.put('/:id', authenticateToken, upload.fields([
   // Merge file paths into updates
   Object.assign(updates, attachments);
 
+  // Remove 'paid' field as it's not part of the customer table
+  delete updates.paid;
+
   // Handle password hashing
   if (updates.password) {
     updates.password = await bcrypt.hash(updates.password, 10);

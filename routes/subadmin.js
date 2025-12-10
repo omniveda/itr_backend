@@ -1,8 +1,15 @@
 import express from 'express';
 import { pool } from '../db.js';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
+
+// Multer config for file uploads (memory storage)
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
@@ -149,6 +156,76 @@ router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/subadmin/update-customer/:customerId
+// Update customer data for fields not filled by agent (subadmin can only update empty/null fields)
+router.put('/update-customer/:customerId', authenticateToken, async (req, res) => {
+  const { customerId } = req.params;
+  const updates = req.body;
+  console.log("customer id",customerId, "update data", updates);
+
+  // Protected fields that subadmin cannot update
+  const protectedFields = ['pan_number', 'adhar_number', 'name', 'mobile_no', 'dob', 'asst_year','customer_id','created_at','updated_at','agentedit','status','ca_upload','subadmin_send','ca_send','ca_id','superadmin_send','otp_check','Subadmin_doc1','Subadmin_doc2'];
+
+  // Remove protected fields from updates
+  protectedFields.forEach(field => delete updates[field]);
+
+  // Check if there are any fields to update
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ message: 'No valid fields to update' });
+  }
+
+  try {
+    // Check if the customer exists in subadmin_itr for this subadmin
+    const [customerRows] = await pool.query(`
+      SELECT c.*
+      FROM customer c
+      WHERE c.id = ?
+    `, [customerId]);
+
+    if (customerRows.length === 0) {
+      return res.status(404).json({ message: 'Customer not found or not accessible' });
+    }
+
+    const customer = customerRows[0];
+
+    // Check which fields are already filled by agent (not null and not empty)
+    const filledByAgent = [];
+    Object.keys(updates).forEach(field => {
+      if (customer[field] !== null && customer[field] !== '') {
+        filledByAgent.push(field);
+      }
+    });
+
+    // if (filledByAgent.length > 0) {
+    //   return res.status(400).json({
+    //     message: 'Cannot update fields already filled by agent',
+    //     filledByAgent
+    //   });
+    // }
+
+    // Handle password hashing
+    if (updates.password) {
+      const bcrypt = await import('bcrypt');
+      updates.password = await bcrypt.default.hash(updates.password, 10);
+    }
+
+    // Build update query
+    const fields = Object.keys(updates);
+    const values = Object.values(updates);
+    const setClause = fields.map(field => `${field} = ?`).join(', ');
+
+    await pool.query(
+      `UPDATE customer SET ${setClause} WHERE id = ?`,
+      [...values, customerId]
+    );
+
+    res.json({ message: 'Customer updated successfully' });
+  } catch (error) {
+    console.error('Error updating customer:', error);
+    res.status(500).json({ message: 'Failed to update customer' });
+  }
+});
+
 // PUT /api/subadmin/assign-ca/:customerId
 // Assign or update CA for a specific customer
 router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
@@ -158,7 +235,7 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
   if (!caId) {
     return res.status(400).json({ message: 'CA ID is required' });
   }
-  
+
   try {
     // Check if the customer exists in subadmin_itr for this subadmin and get agent_id
     const [customerRows] = await pool.query(`
@@ -194,6 +271,57 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error assigning CA:', error);
     res.status(500).json({ message: 'Failed to assign CA' });
+  }
+});
+
+// POST /api/subadmin/upload-subadmin-doc/:customerId
+// Upload subadmin documents (Subadmin_doc1 or Subadmin_doc2)
+router.post('/upload-subadmin-doc/:customerId', authenticateToken, upload.single('file'), async (req, res) => {
+  const { customerId } = req.params;
+  const { docType } = req.body; // 'Subadmin_doc1' or 'Subadmin_doc2'
+
+  if (!req.file) {
+    return res.status(400).json({ message: 'No file uploaded' });
+  }
+
+  if (!docType || !['Subadmin_doc1', 'Subadmin_doc2'].includes(docType)) {
+    return res.status(400).json({ message: 'Invalid docType. Must be Subadmin_doc1 or Subadmin_doc2' });
+  }
+
+  try {
+    // Check if the customer exists and is accessible by this subadmin
+    const [customerRows] = await pool.query(`
+      SELECT itr.customer_id
+      FROM itr WHERE itr.customer_id = ? AND itr.subadmin_send = ?
+    `, [customerId, 1]);
+
+    if (customerRows.length === 0) {
+      return res.status(404).json({ message: 'Customer not found or not accessible' });
+    }
+
+    // Create unique filename
+    const fileName = `subadmin_doc_${customerId}_${docType}_${Date.now()}.pdf`;
+    const filePath = path.join(process.cwd(), 'uploads', fileName);
+
+    // Ensure uploads directory exists
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Write file to local system
+    fs.writeFileSync(filePath, req.file.buffer);
+
+    // Create URL for accessing the file
+    const fileUrl = `http://localhost:3000/uploads/${fileName}`;
+
+    // Update the itr table with the document URL
+    await pool.query(`UPDATE itr SET ${docType} = ? WHERE customer_id = ?`, [fileUrl, customerId]);
+
+    res.json({ message: 'Document uploaded successfully', url: fileUrl });
+  } catch (error) {
+    console.error('File upload error:', error);
+    res.status(500).json({ message: 'File upload failed' });
   }
 });
 
