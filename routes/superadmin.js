@@ -2,8 +2,30 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { pool } from '../db.js';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
+
+// Configure multer for file uploads (using memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|pdf|doc|docx/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image, PDF, and document files are allowed!'));
+    }
+  }
+});
 
 // Middleware to check if user is superadmin
 const requireSuperadmin = (req, res, next) => {
@@ -643,7 +665,7 @@ router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
 router.get('/itrs', requireSuperadmin, async (req, res) => {
   try {
     const [itrs] = await pool.query(`
-      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check
+      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check, itr.Superadmin_doc1
       FROM itr
       LEFT JOIN customer ON itr.customer_id = customer.id
     `);
@@ -689,15 +711,40 @@ router.post('/subadmins/allot-customers', requireSuperadmin, async (req, res) =>
   }
 });
 
-router.put('/otp-check/:itrId', requireSuperadmin, async (req, res) => {
+router.put('/otp-check/:itrId', requireSuperadmin, upload.single('document'), async (req, res) => {
   const { itrId } = req.params;
   try {
-    console.log("Updating OTP check for ITR ID:", itrId);  
-    const [result] = await pool.query('UPDATE itr SET otp_check=TRUE, status="Completed" WHERE id=?', [itrId]);
+    console.log("Updating OTP check for ITR ID:", itrId);
+
+    let updateQuery = 'UPDATE itr SET otp_check=TRUE, status="Completed"';
+    let params = [];
+
+    if (req.file) {
+      const fileName = `superadmin_doc_${itrId}_${Date.now()}${path.extname(req.file.originalname)}`;
+      const filePath = path.join(process.cwd(), 'uploads', fileName);
+
+      // Ensure uploads directory exists
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      // Write file to local system
+      fs.writeFileSync(filePath, req.file.buffer);
+
+      const fileUrl = `http://localhost:3000/uploads/${fileName}`;
+      updateQuery += ', Superadmin_doc1=?';
+      params.push(fileUrl);
+    }
+
+    updateQuery += ' WHERE id=?';
+    params.push(itrId);
+
+    const [result] = await pool.query(updateQuery, params);
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'ITR not found' });
     }
-    res.json({ message: 'OTP check updated successfully' }); // Add this
+    res.json({ message: 'OTP check updated successfully' });
   } catch (error) {
     console.error('Error updating OTP check status:', error);
     return res.status(500).json({ error: 'Failed to update OTP check status' });
