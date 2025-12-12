@@ -49,6 +49,7 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
       'itr.Ca_doc1 AS itr_ca_doc1',
       'itr.Ca_doc2 AS itr_ca_doc2',
       'itr.Ca_doc3 AS itr_ca_doc3',
+      'itr.Comment'
     ];
 
     // Add customer fields if permitted
@@ -155,6 +156,39 @@ router.get('/assigned/:customer_id', async (req, res) => {
   } catch (error) {
     console.error('Error fetching assigned CA:', error);
     res.status(500).json({ message: 'Failed to fetch assigned CA' });
+  }
+});
+
+// Reject an ITR application
+router.post('/reject-itr', authenticateCA, async (req, res) => {
+  const { itr_id, reason } = req.body;
+  const caId = req.caId;
+
+  if (!itr_id || !reason) {
+    return res.status(400).json({ message: 'ITR ID and reason are required' });
+  }
+
+  try {
+    // Check if the CA is assigned to this ITR
+    const [assignment] = await pool.query(
+      'SELECT * FROM ca_itr WHERE ca_id = ? AND customer_id = (SELECT customer_id FROM itr WHERE id = ?)',
+      [caId, itr_id]
+    );
+
+    if (assignment.length === 0) {
+      return res.status(403).json({ message: 'You are not assigned to this ITR' });
+    }
+
+    // Update the ITR status to 'Rejected' and add the comment
+    await pool.query(
+      'UPDATE itr SET status = ?, comment = ? WHERE id = ?',
+      ['Rejected', reason, itr_id]
+    );
+
+    res.json({ message: 'ITR rejected successfully' });
+  } catch (error) {
+    console.error('Error rejecting ITR:', error);
+    res.status(500).json({ message: 'Failed to reject ITR' });
   }
 });
 
