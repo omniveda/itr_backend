@@ -21,11 +21,20 @@ const authenticateToken = (req, res, next) => {
 
 // Process payment
 router.post('/process', authenticateToken, async (req, res) => {
-  const { customerIds, amount, paymentMethod } = req.body;
+  const { customerIds, amount, paymentMethod, yearswithcustomers,customerAsstYears } = req.body;
+  console.log("asst year", req.body);
+  console.log("customer asst year",customerAsstYears[customerIds]);
+  
+
 
   if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0 || !amount || !paymentMethod) {
     return res.status(400).json({ message: 'Customer IDs array, amount, and payment method are required' });
   }
+
+  const customerYearPairs = customerIds.map((customerId, index) => ({
+  customerId,
+  asstYear: yearswithcustomers[index]
+}));
 
   if (!['wallet', 'razorpay'].includes(paymentMethod)) {
     return res.status(400).json({ message: 'Invalid payment method' });
@@ -73,17 +82,18 @@ router.post('/process', authenticateToken, async (req, res) => {
         );
 
         // Create payment records for each customer
-        const paymentValues = customerIds.map(customerId => [
+        const paymentValues = customerYearPairs.map(customeryearpair => [
           req.agentId,
-          customerId,
+          customeryearpair.customerId,
           amount / customerIds.length, // Assuming equal split, but since amount is total, adjust if needed
-          paymentMethod
+          paymentMethod,
+          customeryearpair.asstYear
         ]);
-        const placeholdersInsert = paymentValues.map(() => '(?, ?, ?, TRUE, ?)').join(',');
+        const placeholdersInsert = paymentValues.map(() => '(?, ?, ?, TRUE, ?,?)').join(',');
         const flatValues = paymentValues.flat();
 
         await pool.query(
-          `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method) VALUES ${placeholdersInsert}`,
+          `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES ${placeholdersInsert}`,
           flatValues
         );
 
@@ -253,13 +263,14 @@ router.get('/check-status/:customerId', authenticateToken, async (req, res) => {
 
     // Check if payment exists and is paid
     const [paymentRows] = await pool.query(
-      'SELECT paid FROM payment WHERE customer_id = ? AND agent_id = ?',
+      'SELECT paid,asst_year FROM payment WHERE customer_id = ? AND agent_id = ?',
       [customerId, req.agentId]
     );
 
     const hasPaid = paymentRows.length > 0 && paymentRows[0].paid;
+    console.log(paymentRows);
 
-    res.json({ hasPaid });
+    res.json({ paymentRows});
   } catch (error) {
     console.error('Error checking payment status:', error);
     res.status(500).json({ message: 'Failed to check payment status' });

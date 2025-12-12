@@ -126,6 +126,10 @@ router.post('/with-payment', authenticateToken, upload.fields([
     return res.status(400).json({ message: 'Valid file charge is required' });
   }
 
+  const currentYear = new Date().getFullYear();
+const nextYear = currentYear + 1;
+const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
+
   if (!customerData.name || !customerData.mobile_no || !customerData.pan_number) {
     return res.status(400).json({ message: 'Name, mobile number, and PAN number are required' });
   }
@@ -189,8 +193,8 @@ router.post('/with-payment', authenticateToken, upload.fields([
 
     // Insert payment record
     await pool.query(
-      'INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method) VALUES (?, ?, ?, TRUE, ?)',
-      [req.agentId, customerId, amount, paymentMethod]
+      'INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES (?, ?, ?, TRUE, ?,?)',
+      [req.agentId, customerId, amount, paymentMethod,year]
     );
 
     await pool.query('COMMIT');
