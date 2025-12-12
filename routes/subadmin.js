@@ -328,3 +328,30 @@ router.post('/upload-subadmin-doc/:customerId', authenticateToken, upload.single
 });
 
 export default router;
+
+// POST /api/subadmin/reapply-itr/:customerId
+// Allows subadmin to mark a previously rejected ITR as reapplied (set status to In Progress and clear comment)
+router.post('/reapply-itr/:customerId', authenticateToken, async (req, res) => {
+  const { customerId } = req.params;
+
+  try {
+    // Verify ITR exists for this customer
+    const [rows] = await pool.query('SELECT id, status FROM itr WHERE customer_id = ?', [customerId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'ITR not found for this customer' });
+    }
+
+    const currentStatus = rows[0].status;
+    if (currentStatus !== 'Rejected') {
+      return res.status(400).json({ message: 'Only rejected ITRs can be reapplied' });
+    }
+
+    // Update status to In Progress and clear comment field
+    await pool.query('UPDATE itr SET status = ?, comment = ? WHERE customer_id = ?', ['In Progress', '', customerId]);
+
+    res.json({ message: 'ITR marked as Reapplied (In Progress) successfully' });
+  } catch (error) {
+    console.error('Error reapplying ITR:', error);
+    res.status(500).json({ message: 'Failed to reapply ITR' });
+  }
+});
