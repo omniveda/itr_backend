@@ -125,6 +125,67 @@ router.get('/customers-itr', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/subadmin/agents - List agents (subadmin must have manage_agents permission)
+// If subadmin doesn't have the manage_agents permission, return an empty array.
+router.get('/agents', authenticateToken, async (req, res) => {
+  try {
+    // Check manage_agents permission for this subadmin
+    const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [req.subadminId, 'manage_agents']);
+    if (permRows.length === 0) {
+      // If subadmin does not have manage_agents permission, return empty array (hide data)
+      return res.json([]);
+    }
+
+    // Check field-level permissions for subadmin for agent fields like wbalance
+    const permId = permRows[0].id;
+    const [permAgentRows] = await pool.query('SELECT * FROM subadmin_permission_agent WHERE subadmin_permissions_id = ?', [permId]);
+    const permAgent = permAgentRows.length > 0 ? permAgentRows[0] : null;
+    const canViewWbalance = permAgent ? !!permAgent.wbalance : true;
+
+    const [agents] = await pool.query(`
+      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.file_charge, a.wbalance
+      FROM agent a
+    `);
+
+    // Remove wbalance from results if subadmin doesn't have permission
+    const result = agents.map(a => ({
+      ...a
+    }));
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching agents for subadmin:', error);
+    res.status(500).json({ message: 'Failed to fetch agents' });
+  }
+});
+
+// PUT /api/subadmin/agents/:id/verify - Toggle agent verification (subadmin must have manage_agents permission)
+router.put('/agents/:id/verify', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Check manage_agents permission for this subadmin
+    const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [req.subadminId, 'manage_agents']);
+    if (permRows.length === 0) {
+      // If subadmin doesn't have manage_agents permission, return 403 Forbidden (no action allowed)
+      return res.status(403).json({ message: 'Access denied. Manage agents permission required.' });
+    }
+
+    // Get current status
+    const [rows] = await pool.query('SELECT isagent FROM agent WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    const currentStatus = rows[0].isagent;
+    const newStatus = currentStatus === 'verified' ? 'unverified' : 'verified';
+
+    await pool.query('UPDATE agent SET isagent = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: `Agent ${newStatus} successfully`, isagent: newStatus });
+  } catch (error) {
+    console.error('Error updating agent verification by subadmin:', error);
+    res.status(500).json({ message: 'Failed to update agent verification' });
+  }
+});
+
 // PUT /api/subadmin/toggle-agentedit/:itrId
 // Toggle the agentedit field for a specific ITR
 router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
@@ -153,6 +214,27 @@ router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error toggling agent edit:', error);
     res.status(500).json({ message: 'Failed to toggle agent edit' });
+  }
+});
+
+// GET /api/subadmin/agent-permissions - Return subadmin's agent field permissions (for manage_agents)
+router.get('/agent-permissions', authenticateToken, async (req, res) => {
+  try {
+    const [permRows] = await pool.query('SELECT id FROM subadmin_permissions WHERE subadmin_id = ? AND permission = ?', [req.subadminId, 'manage_agents']);
+    if (permRows.length === 0) {
+      // Return default object with zeroed fields
+      return res.json({ name: 0, father_name: 0, mobile_no: 0, mail_id: 0, address: 0, profile_photo: 0, alternate_mobile_no: 0, password: 0, wbalance: 0 });
+    }
+    const permId = permRows[0].id;
+    const [rows] = await pool.query('SELECT * FROM subadmin_permission_agent WHERE subadmin_permissions_id = ?', [permId]);
+    if (rows.length > 0) {
+      res.json(rows[0]);
+    } else {
+      res.json({ name: 0, father_name: 0, mobile_no: 0, mail_id: 0, address: 0, profile_photo: 0, alternate_mobile_no: 0, password: 0, wbalance: 0 });
+    }
+  } catch (error) {
+    console.error('Error fetching subadmin agent permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch subadmin agent permissions' });
   }
 });
 
