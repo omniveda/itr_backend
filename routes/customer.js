@@ -143,6 +143,7 @@ const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
       [req.agentId]
     );
 
+
     if (agentRows.length === 0) {
       await pool.query('ROLLBACK');
       return res.status(404).json({ message: 'Agent not found' });
@@ -192,10 +193,20 @@ const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
     const customerId = customerResult.insertId;
 
     // Insert payment record
-    await pool.query(
+    const [payment] = await pool.query(
       'INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES (?, ?, ?, TRUE, ?,?)',
       [req.agentId, customerId, amount, paymentMethod,year]
     );
+
+    const balanceBeforeTxn = currentBalance;
+        const balanceAfterTxn = currentBalance - amount;
+
+        const [txnResult] = await pool.query(
+            `INSERT INTO wallet_transactions 
+             (agent_id, performed_by, transaction_type, amount, balance_before, balance_after, reference_type, reference_id, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [ req.agentId, req.agentId, 'debit', amount, balanceBeforeTxn, balanceAfterTxn, 'itr_payment', payment.insertId, 'ITR Payment']
+          );
 
     await pool.query('COMMIT');
     res.status(201).json({ message: 'Customer added and payment processed successfully', customerId });

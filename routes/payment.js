@@ -81,6 +81,8 @@ router.post('/process', authenticateToken, async (req, res) => {
           [amount, req.agentId]
         );
 
+        const amountPerCustomer = parseFloat(amount) / customerIds.length;
+
         // Create payment records for each customer
         const paymentValues = customerYearPairs.map(customeryearpair => [
           req.agentId,
@@ -92,10 +94,21 @@ router.post('/process', authenticateToken, async (req, res) => {
         const placeholdersInsert = paymentValues.map(() => '(?, ?, ?, TRUE, ?,?)').join(',');
         const flatValues = paymentValues.flat();
 
-        await pool.query(
+        const [payment] = await pool.query(
           `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES ${placeholdersInsert}`,
           flatValues
         );
+        console.log("payemnt",payment);
+
+        const balanceBeforeTxn = currentBalance;
+        const balanceAfterTxn = currentBalance - amountPerCustomer;
+
+        const [txnResult] = await pool.query(
+            `INSERT INTO wallet_transactions 
+             (agent_id, performed_by, transaction_type, amount, balance_before, balance_after, reference_type, reference_id, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [ req.agentId, req.agentId, 'debit', amountPerCustomer, balanceBeforeTxn, balanceAfterTxn, 'itr_payment', payment.insertId, 'ITR Payment']
+          );
 
         await pool.query('COMMIT');
         res.json({ message: 'Payment processed successfully via wallet' });
