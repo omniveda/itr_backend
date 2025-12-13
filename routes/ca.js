@@ -49,7 +49,10 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
       'itr.Ca_doc1 AS itr_ca_doc1',
       'itr.Ca_doc2 AS itr_ca_doc2',
       'itr.Ca_doc3 AS itr_ca_doc3',
-      'itr.Comment'
+      'itr.Comment',
+      'itr.subadmin_send',
+      'itr.Subadmin_doc1',
+      'itr.Subadmin_doc2'
     ];
 
     // Add customer fields if permitted
