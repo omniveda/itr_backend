@@ -116,6 +116,9 @@ router.post('/with-payment', authenticateToken, upload.fields([
 ]), async (req, res) => {
   const { paymentMethod, ...customerData } = req.body;
 
+  console.log('Customer data:', customerData);
+  console.log('Payment method:', paymentMethod);
+
   if (paymentMethod !== 'wallet') {
     return res.status(400).json({ message: 'This endpoint only supports wallet payment' });
   }
@@ -195,7 +198,7 @@ const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
     // Insert payment record
     const [payment] = await pool.query(
       'INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES (?, ?, ?, TRUE, ?,?)',
-      [req.agentId, customerId, amount, paymentMethod,year]
+      [req.agentId, customerId, amount, paymentMethod,customerData.asst_year_3yr]
     );
 
     const balanceBeforeTxn = currentBalance;
@@ -418,10 +421,10 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
     const subadminPlaceholders = subadminValues.map(() => '(?, ?)').join(',');
     const subadminFlatValues = subadminValues.flat();
     console.log("subadmin place holder and subadmin flat values",subadminPlaceholders, subadminFlatValues);
-    await pool.query(
-      `INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ${subadminPlaceholders}`,
-      subadminFlatValues
-    );
+    // await pool.query(
+    //   `INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ${subadminPlaceholders}`,
+    //   subadminFlatValues
+    // );
 
     res.json({
       message: `${newEntries.length} customer(s) sent to subadmin successfully`,
