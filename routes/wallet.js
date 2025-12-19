@@ -32,8 +32,8 @@ const requireSuperadmin = (req, res, next) => {
 // GET /api/agent/wallet/balance - Get current wallet balance
 router.get('/agent/balance', authenticateToken, async (req, res) => {
   try {
-      const agentId = req.user.id;
-      console.log("agetnId",agentId);
+    const agentId = req.user.id;
+    console.log("agetnId", agentId);
     const [rows] = await pool.query(
       'SELECT id, wbalance FROM agent WHERE id = ?',
       [agentId]
@@ -55,40 +55,75 @@ router.get('/agent/balance', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/agent/wallet/transactions - Get transaction history
+// GET /api/agent/wallet/transactions - Get transaction history with filters
 router.get('/agent/transactions', authenticateToken, async (req, res) => {
   try {
     const agentId = req.user.id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const offset = (page - 1) * limit;
+    const { page = 1, limit = 10, searchTerm, transactionType, startDate, endDate } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let whereClause = 'WHERE wt.agent_id = ?';
+    const queryParams = [agentId];
+
+    if (searchTerm) {
+      whereClause += ` AND (
+        c.name LIKE ? OR 
+        c.pan_number LIKE ? OR 
+        c.mobile_no LIKE ? OR 
+        wt.description LIKE ? OR 
+        wt.reference_id LIKE ?
+      )`;
+      const searchPattern = `%${searchTerm}%`;
+      queryParams.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    if (transactionType && (transactionType === 'credit' || transactionType === 'debit')) {
+      whereClause += ' AND wt.transaction_type = ?';
+      queryParams.push(transactionType);
+    }
+
+    if (startDate) {
+      whereClause += ' AND wt.created_at >= ?';
+      queryParams.push(`${startDate} 00:00:00`);
+    }
+
+    if (endDate) {
+      whereClause += ' AND wt.created_at <= ?';
+      queryParams.push(`${endDate} 23:59:59`);
+    }
 
     // Get transactions with pagination
     const [transactions] = await pool.query(
-      `SELECT wt.*, i.asst_year,i.customer_id,
+      `SELECT wt.*, p.asst_year, p.customer_id,
+              c.name as customer_name, c.pan_number as customer_pan, c.mobile_no as customer_mobile,
               CASE WHEN wt.reference_type = 'itr_payment' 
-                   THEN CONCAT('ITR Payment (', i.asst_year, ')') 
-                   ELSE 'Wallet Recharge' 
-              END as description
+                   THEN CONCAT('ITR Payment (', p.asst_year, ')') 
+                   ELSE wt.description 
+              END as display_description
        FROM wallet_transactions wt
-       LEFT JOIN payment i ON wt.reference_id = i.id AND wt.reference_type = 'itr_payment'
-       WHERE wt.agent_id = ?
+       LEFT JOIN payment p ON wt.reference_id = p.id AND wt.reference_type = 'itr_payment'
+       LEFT JOIN customer c ON p.customer_id = c.id
+       ${whereClause}
        ORDER BY wt.created_at DESC
        LIMIT ? OFFSET ?`,
-      [agentId, limit, offset]
+      [...queryParams, parseInt(limit), offset]
     );
 
-    // Get total count
+    // Get total count with filters
     const [countRows] = await pool.query(
-      'SELECT COUNT(*) as total FROM wallet_transactions WHERE agent_id = ?',
-      [agentId]
+      `SELECT COUNT(*) as total 
+       FROM wallet_transactions wt
+       LEFT JOIN payment p ON wt.reference_id = p.id AND wt.reference_type = 'itr_payment'
+       LEFT JOIN customer c ON p.customer_id = c.id
+       ${whereClause}`,
+      queryParams
     );
 
     res.json({
       transactions,
       total: countRows[0].total,
-      page,
-      limit
+      page: parseInt(page),
+      limit: parseInt(limit)
     });
   } catch (error) {
     console.error('Error fetching transactions:', error);
@@ -159,7 +194,7 @@ router.post('/agent/pay-itr', authenticateToken, async (req, res) => {
       `INSERT INTO wallet_transactions 
        (agent_id, performed_by, transaction_type, amount, balance_before, balance_after, reference_type, reference_id, description)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [ agentId, agentId, 'debit', amount, balanceBefore, balanceAfter, 'itr_payment', itrId, 'ITR Payment']
+      [agentId, agentId, 'debit', amount, balanceBefore, balanceAfter, 'itr_payment', itrId, 'ITR Payment']
     );
 
     // Create ITR payment record
