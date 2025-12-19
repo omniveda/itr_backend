@@ -32,13 +32,14 @@ router.get('/sent-customers', authenticateToken, async (req, res) => {
   try {
     console.log('Decoded subadminId from JWT:', req.subadminId);
     const [rows] = await pool.query(`
-      SELECT s.id, s.customer_id, s.agent_id, s.sent_at,
-        c.name AS customer_name, c.pan_number, c.mobile_no AS customer_mobile, c.mail_id AS customer_email, c.dob,
+      SELECT s.id, i.customer_id, i.agent_id, i.created_at AS sent_at,
+             c.name AS customer_name, c.pan_number, c.mobile_no AS customer_mobile, c.mail_id AS customer_email, c.dob,
              a.name AS agent_name, a.mobile_no AS agent_mobile
       FROM subadmin_itr s
-      JOIN customer c ON s.customer_id = c.id
-      JOIN agent a ON s.agent_id = a.id
-      ORDER BY s.sent_at DESC
+      JOIN itr i ON s.itr_id = i.id
+      JOIN customer c ON i.customer_id = c.id
+      JOIN agent a ON i.agent_id = a.id
+      ORDER BY i.created_at DESC
     `);
     console.log('Rows returned from subadmin_itr join:', rows.length);
     res.json(rows);
@@ -111,12 +112,12 @@ router.get('/customers-itr', authenticateToken, async (req, res) => {
 
     // Get ITR and customer data for customers sent to subadmin
     const [rows] = await pool.query(`
-      SELECT itr.*, customer.*
+      SELECT itr.*, customer.*, itr.id as itr_id, customer.id as customer_id
       FROM itr
       JOIN customer ON itr.customer_id = customer.id
       ORDER BY itr.id DESC
     `);
-    console.log('subadmin data ony',rows);
+    console.log('subadmin data ony', rows);
 
     res.json({ data: rows, permissions });
   } catch (error) {
@@ -199,7 +200,7 @@ router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
       WHERE itr.customer_id = ?
     `, [itrId]);
     // console.log('ITR rows for toggle-agentedit: itrId',itrId,"req.subadminId", req.subadminId );
-   
+
     if (rows.length === 0) {
       return res.status(404).json({ message: 'ITR not found or not accessible' });
     }
@@ -208,7 +209,7 @@ router.put('/toggle-agentedit/:itrId', authenticateToken, async (req, res) => {
     const newAgentEdit = currentAgentEdit ? 0 : 1;
     // console.log("Rows data", rows.id);
 
-    await pool.query('UPDATE itr SET agentedit = ? WHERE customer_id = ?', [newAgentEdit, itrId]);
+    await pool.query('UPDATE itr SET agentedit = ? WHERE id = ?', [newAgentEdit, itrId]);
 
     res.json({ message: 'Agent edit toggled successfully', agentedit: newAgentEdit });
   } catch (error) {
@@ -243,10 +244,10 @@ router.get('/agent-permissions', authenticateToken, async (req, res) => {
 router.put('/update-customer/:customerId', authenticateToken, async (req, res) => {
   const { customerId } = req.params;
   const updates = req.body;
-  console.log("customer id",customerId, "update data", updates);
+  console.log("customer id", customerId, "update data", updates);
 
   // Protected fields that subadmin cannot update
-  const protectedFields = ['pan_number', 'adhar_number', 'name', 'mobile_no', 'dob', 'asst_year','customer_id','created_at','updated_at','agentedit','status','ca_upload','subadmin_send','ca_send','ca_id','superadmin_send','otp_check','Subadmin_doc1','Subadmin_doc2'];
+  const protectedFields = ['pan_number', 'adhar_number', 'name', 'mobile_no', 'dob', 'asst_year', 'customer_id', 'created_at', 'updated_at', 'agentedit', 'status', 'ca_upload', 'subadmin_send', 'ca_send', 'ca_id', 'superadmin_send', 'otp_check', 'Subadmin_doc1', 'Subadmin_doc2'];
 
   // Remove protected fields from updates
   protectedFields.forEach(field => delete updates[field]);
@@ -335,7 +336,7 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
     // Update the ca_id and ca_send in itr table for this customer
     await pool.query('UPDATE itr SET ca_id = ?, ca_send = TRUE WHERE customer_id = ?', [caId, customerId]);
 
-    await pool.query('UPDATE itr SET status = "In Progress" WHERE customer_id = ?',[customerId]);
+    await pool.query('UPDATE itr SET status = "Filled" WHERE customer_id = ?', [customerId]);
 
     // Delete the last record for this customer_id if it exists
     await pool.query(`
@@ -409,7 +410,38 @@ router.post('/upload-subadmin-doc/:customerId', authenticateToken, upload.single
   }
 });
 
-export default router;
+// POST /api/subadmin/take-itr/:itrId
+// Subadmin "takes" an ITR, updating its status and logging it in subadmin_itr
+router.post('/take-itr/:itrId', authenticateToken, async (req, res) => {
+  const { itrId } = req.params;
+  const subadminId = req.subadminId;
+
+  try {
+    // 1. Update status in itr table
+    await pool.query('UPDATE itr SET status = ? WHERE id = ?', ['In Progress', itrId]);
+
+    // 2. Upsert into subadmin_itr
+    const [existing] = await pool.query('SELECT id FROM subadmin_itr WHERE itr_id = ? AND subadmin_id = ?', [itrId, subadminId]);
+
+    if (existing.length > 0) {
+      await pool.query('UPDATE subadmin_itr SET status = ? WHERE itr_id = ? AND subadmin_id = ?', ['In Progress', itrId, subadminId]);
+    } else {
+      // Fetch customer_id to keep subadmin_itr consistent
+      const [itrRow] = await pool.query('SELECT customer_id FROM itr WHERE id = ?', [itrId]);
+      if (itrRow.length === 0) {
+        return res.status(404).json({ message: 'ITR not found' });
+      }
+      const customerId = itrRow[0].customer_id;
+      await pool.query('INSERT INTO subadmin_itr (itr_id, subadmin_id, status) VALUES (?, ?, ?)', [itrId, subadminId, 'In Progress']);
+    }
+
+    res.json({ message: 'ITR taken successfully', status: 'In Progress' });
+  } catch (error) {
+    console.error('Error taking ITR:', error);
+    res.status(500).json({ message: 'Failed to take ITR' });
+  }
+});
+
 
 // POST /api/subadmin/reapply-itr/:customerId
 // Allows subadmin to mark a previously rejected ITR as reapplied (set status to In Progress and clear comment)
@@ -437,3 +469,5 @@ router.post('/reapply-itr/:customerId', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Failed to reapply ITR' });
   }
 });
+
+export default router;

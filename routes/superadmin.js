@@ -67,19 +67,19 @@ router.get('/agents', requireSuperadmin, async (req, res) => {
   }
 });
 
-router.put('/agents/:id/file-charge',requireSuperadmin, async (req, res) => {
-  const {id}=req.params;
-  const {fileCharge}=req.body;
-  try{
-    const [rows]=await pool.query('SELECT id FROM agent WHERE id=?',[id]);
-    if(rows.length===0){
-      return res.status(404).json({error:'Agent not found'});
+router.put('/agents/:id/file-charge', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { fileCharge } = req.body;
+  try {
+    const [rows] = await pool.query('SELECT id FROM agent WHERE id=?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Agent not found' });
     }
     console.log(fileCharge);
-    await pool.query('UPDATE agent SET file_charge=? WHERE id=?',[fileCharge,id]);
+    await pool.query('UPDATE agent SET file_charge=? WHERE id=?', [fileCharge, id]);
     res.json({ message: `Agent ${fileCharge} file charge successfully set` });
-  }catch{
-    res.status(500).json({error:'Failed to update agent'});
+  } catch {
+    res.status(500).json({ error: 'Failed to update agent' });
   }
 });
 
@@ -260,7 +260,7 @@ router.put('/subadmins/:id/permissions', requireSuperadmin, async (req, res) => 
     }
 
     // Handle subadmin_customer_permission table for manage_agents permission (customer fields)
-    console.log("permissions",permissions.includes('manage_itr'));
+    console.log("permissions", permissions.includes('manage_itr'));
     const hasManageAgents = permissions.includes('manage_itr');
     if (hasManageAgents) {
       // Get the permission id for manage_agents
@@ -540,16 +540,18 @@ router.put('/cas/:id/status', requireSuperadmin, async (req, res) => {
     console.error('Error updating CA status:', error);
     res.status(500).json({ error: 'Failed to update CA status' });
   }
-}); 
+});
 
 // Get all customers with assignment status
 router.get('/customers', requireSuperadmin, async (req, res) => {
   try {
     const { caId } = req.query;
     let query = `
-      SELECT c.*, si.subadmin_id as assignedSubadminId
+      SELECT c.*, MAX(si.subadmin_id) as assignedSubadminId
       FROM customer c
-      LEFT JOIN subadmin_itr si ON c.id = si.customer_id
+      LEFT JOIN itr i ON c.id = i.customer_id
+      LEFT JOIN subadmin_itr si ON i.id = si.itr_id
+      GROUP BY c.id
     `;
     let params = [];
 
@@ -697,9 +699,14 @@ router.post('/subadmins/allot-customers', requireSuperadmin, async (req, res) =>
       return res.status(404).json({ error: 'One or more customers not found' });
     }
 
-    // Insert records into subadmin_itr table
-    const values = customerIds.map(customerId => [customerId, subadminId]);
-    await pool.query('INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ?', [values]);
+    // Get all ITRs for these customers that are meant for subadmin
+    const [itrs] = await pool.query('SELECT id FROM itr WHERE customer_id IN (?) AND subadmin_send = TRUE', [customerIds]);
+
+    if (itrs.length > 0) {
+      // Insert records into subadmin_itr table
+      const values = itrs.map(itr => [itr.id, subadminId]);
+      await pool.query('INSERT INTO subadmin_itr (itr_id, subadmin_id) VALUES ?', [values]);
+    }
 
     // Update customer table to set subadmin_send = TRUE
     await pool.query('UPDATE customer SET subadmin_send = TRUE WHERE id IN (?)', [customerIds]);
@@ -757,14 +764,14 @@ router.delete('/subadmins/:subadminId/allot-customers/:customerId', requireSuper
   const { subadminId, customerId } = req.params;
 
   try {
-    // Verify the allotment exists
-    const [rows] = await pool.query('SELECT id FROM subadmin_itr WHERE customer_id = ? AND subadmin_id = ?', [customerId, subadminId]);
+    // Verify the allotment exists via its ITRs
+    const [rows] = await pool.query('SELECT si.id FROM subadmin_itr si JOIN itr i ON si.itr_id = i.id WHERE i.customer_id = ? AND si.subadmin_id = ?', [customerId, subadminId]);
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Customer allotment not found' });
     }
 
     // Delete the allotment record
-    await pool.query('DELETE FROM subadmin_itr WHERE customer_id = ? AND subadmin_id = ?', [customerId, subadminId]);
+    await pool.query('DELETE si FROM subadmin_itr si JOIN itr i ON si.itr_id = i.id WHERE i.customer_id = ? AND si.subadmin_id = ?', [customerId, subadminId]);
 
     // Update customer table to set subadmin_send = FALSE
     await pool.query('UPDATE customer SET subadmin_send = FALSE WHERE id = ?', [customerId]);
@@ -995,7 +1002,7 @@ router.get('/flow', requireSuperadmin, async (req, res) => {
       FROM itr
       LEFT JOIN customer ON itr.customer_id = customer.id
       LEFT JOIN agent ON itr.agent_id = agent.id
-      LEFT JOIN subadmin_itr ON itr.customer_id = subadmin_itr.customer_id
+      LEFT JOIN subadmin_itr ON itr.id = subadmin_itr.itr_id
       LEFT JOIN subadmin ON subadmin_itr.subadmin_id = subadmin.id
       LEFT JOIN ca_itr ON itr.customer_id = ca_itr.customer_id
       LEFT JOIN ca ON ca_itr.ca_id = ca.id

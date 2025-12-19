@@ -130,8 +130,8 @@ router.post('/with-payment', authenticateToken, upload.fields([
   }
 
   const currentYear = new Date().getFullYear();
-const nextYear = currentYear + 1;
-const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
+  const nextYear = currentYear + 1;
+  const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
 
   if (!customerData.name || !customerData.mobile_no || !customerData.pan_number) {
     return res.status(400).json({ message: 'Name, mobile number, and PAN number are required' });
@@ -198,18 +198,18 @@ const year = `${currentYear}-${nextYear.toString().slice(-2)}`;
     // Insert payment record
     const [payment] = await pool.query(
       'INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES (?, ?, ?, TRUE, ?,?)',
-      [req.agentId, customerId, amount, paymentMethod,customerData.asst_year_3yr]
+      [req.agentId, customerId, amount, paymentMethod, customerData.asst_year_3yr]
     );
 
     const balanceBeforeTxn = currentBalance;
-        const balanceAfterTxn = currentBalance - amount;
+    const balanceAfterTxn = currentBalance - amount;
 
-        const [txnResult] = await pool.query(
-            `INSERT INTO wallet_transactions 
+    const [txnResult] = await pool.query(
+      `INSERT INTO wallet_transactions 
              (agent_id, performed_by, transaction_type, amount, balance_before, balance_after, reference_type, reference_id, description)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [ req.agentId, req.agentId, 'debit', amount, balanceBeforeTxn, balanceAfterTxn, 'itr_payment', payment.insertId, 'ITR Payment']
-          );
+      [req.agentId, req.agentId, 'debit', amount, balanceBeforeTxn, balanceAfterTxn, 'itr_payment', payment.insertId, 'ITR Payment']
+    );
 
     await pool.query('COMMIT');
     res.status(201).json({ message: 'Customer added and payment processed successfully', customerId });
@@ -420,7 +420,7 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
     const subadminValues = newCustomerIds.map(id => [id, subadmin_id]);
     const subadminPlaceholders = subadminValues.map(() => '(?, ?)').join(',');
     const subadminFlatValues = subadminValues.flat();
-    console.log("subadmin place holder and subadmin flat values",subadminPlaceholders, subadminFlatValues);
+    console.log("subadmin place holder and subadmin flat values", subadminPlaceholders, subadminFlatValues);
     // await pool.query(
     //   `INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ${subadminPlaceholders}`,
     //   subadminFlatValues
@@ -441,11 +441,12 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
 router.get('/sent-to-subadmin', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(`
-      SELECT c.*, si.sent_at, a.name as agent_name
+      SELECT c.*, i.created_at as sent_at, a.name as agent_name
       FROM subadmin_itr si
-      JOIN customer c ON si.customer_id = c.id
-      JOIN agent a ON si.agent_id = a.id
-      ORDER BY si.sent_at DESC
+      JOIN itr i ON si.itr_id = i.id
+      JOIN customer c ON i.customer_id = c.id
+      JOIN agent a ON i.agent_id = a.id
+      ORDER BY i.created_at DESC
     `);
     res.json(rows);
   } catch (error) {
