@@ -17,7 +17,7 @@ import superadminRoutes from './routes/superadmin.js';
 import messageRoutes from './routes/messages.js';
 import chatRoutes from './routes/chat.js';
 import walletRoutes from './routes/wallet.js';
-// import agentRoutes from './routes/agent.js';
+import agentRoutes from './routes/agent.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,15 +45,7 @@ app.get('/', (req, res) => {
 });
 
 // Example route to test DB connection
-app.get('/agents', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT * FROM agent');
-    res.json(rows);
-  } catch (error) {
-    console.error('Error fetching agents:', error);
-    res.status(500).json({ error: 'Database query error' });
-  }
-});
+app.get('/agents', agentRoutes);
 
 // Use auth routes
 app.use('/auth', authRoutes);
