@@ -92,8 +92,8 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
     const query = `
       SELECT ${selectClause}
       FROM ca_itr
-      JOIN itr ON ca_itr.customer_id = itr.customer_id
-      JOIN customer c ON ca_itr.customer_id = c.id
+      JOIN itr ON ca_itr.itr_id = itr.id
+      JOIN customer c ON itr.customer_id = c.id
       JOIN agent a ON itr.agent_id = a.id
       WHERE ca_itr.ca_id = ?
     `;

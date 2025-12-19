@@ -341,18 +341,18 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
     await pool.query('UPDATE subadmin_itr SET status = "Filled" WHERE itr_id = ?', [itrId]);
 
     // Delete the last record for this customer_id if it exists
-    await pool.query(`
-      DELETE FROM ca_itr
-      WHERE customer_id = ?
-      ORDER BY id DESC
-      LIMIT 1
-    `, [customerId]);
+    // await pool.query(`
+    //   DELETE FROM ca_itr
+    //   WHERE itr_id = ?
+    //   ORDER BY id DESC
+    //   LIMIT 1
+    // `, [itrId]);
 
     // Insert the new record into the ca_itr table
     await pool.query(`
-      INSERT INTO ca_itr (customer_id, ca_id)
-      VALUES (?, ?)
-    `, [customerId, caId]);
+      INSERT INTO ca_itr (itr_id, ca_id,status)
+      VALUES (?, ?,?)
+    `, [itrId, caId,'Filled']);
 
     res.json({ message: 'CA assigned successfully' });
   } catch (error) {
