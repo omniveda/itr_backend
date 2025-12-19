@@ -322,7 +322,7 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
   try {
     // Check if the customer exists in subadmin_itr for this subadmin and get agent_id
     const [customerRows] = await pool.query(`
-      SELECT itr.customer_id, itr.agent_id
+      SELECT itr.id as itr_id, itr.customer_id, itr.agent_id
       FROM itr WHERE itr.customer_id = ? AND itr.subadmin_send = ?
     `, [customerId, 1]);
 
@@ -331,12 +331,14 @@ router.put('/assign-ca/:customerId', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Customer not found or not accessible' });
     }
 
-    const agentId = customerRows[0].agent_id;
+    const itrId = customerRows[0].itr_id;
 
     // Update the ca_id and ca_send in itr table for this customer
     await pool.query('UPDATE itr SET ca_id = ?, ca_send = TRUE WHERE customer_id = ?', [caId, customerId]);
 
     await pool.query('UPDATE itr SET status = "Filled" WHERE customer_id = ?', [customerId]);
+
+    await pool.query('UPDATE subadmin_itr SET status = "Filled" WHERE itr_id = ?', [itrId]);
 
     // Delete the last record for this customer_id if it exists
     await pool.query(`
@@ -443,6 +445,30 @@ router.post('/take-itr/:itrId', authenticateToken, async (req, res) => {
 });
 
 
+// POST /api/subadmin/reject-itr/:itrId
+// Allows subadmin to reject an ITR (sets status to Rejected and records a comment)
+router.post('/reject-itr/:itrId', authenticateToken, async (req, res) => {
+  const { itrId } = req.params;
+  const { comment } = req.body;
+
+  if (!comment) {
+    return res.status(400).json({ message: 'Rejection comment is required' });
+  }
+
+  try {
+    // 1. Update status and comment in itr table
+    await pool.query('UPDATE itr SET status = ?, Comment = ? WHERE id = ?', ['Rejected', comment, itrId]);
+
+    // 2. Update status in subadmin_itr table
+    await pool.query('UPDATE subadmin_itr SET status = ? WHERE itr_id = ?', ['Rejected', itrId]);
+
+    res.json({ message: 'ITR rejected successfully', status: 'Rejected' });
+  } catch (error) {
+    console.error('Error rejecting ITR:', error);
+    res.status(500).json({ message: 'Failed to reject ITR' });
+  }
+});
+
 // POST /api/subadmin/reapply-itr/:customerId
 // Allows subadmin to mark a previously rejected ITR as reapplied (set status to In Progress and clear comment)
 router.post('/reapply-itr/:customerId', authenticateToken, async (req, res) => {
@@ -460,13 +486,33 @@ router.post('/reapply-itr/:customerId', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Only rejected ITRs can be reapplied' });
     }
 
-    // Update status to In Progress and clear comment field
-    await pool.query('UPDATE itr SET status = ?, comment = ? WHERE customer_id = ?', ['In Progress', '', customerId]);
+    // Update status to Sent to Subadmin and clear comment field
+    await pool.query('UPDATE itr SET status = ?, Comment = ? WHERE customer_id = ?', ['Pending', '', customerId]);
 
-    res.json({ message: 'ITR marked as Reapplied (In Progress) successfully' });
+    // Remove from subadmin_itr so it can be "Taken" again
+    // await pool.query('DELETE FROM subadmin_itr WHERE itr_id = ?', [rows[0].id]);
+
+    res.json({ message: 'ITR marked as Reapplied successfully. It can now be taken again.' });
   } catch (error) {
     console.error('Error reapplying ITR:', error);
     res.status(500).json({ message: 'Failed to reapply ITR' });
+  }
+});
+
+// GET /api/subadmin/taken-itrs
+// Fetch all ITRs that the current subadmin has "taken" (In Progress or Filled)
+router.get('/taken-itrs', authenticateToken, async (req, res) => {
+  const subadminId = req.subadminId;
+
+  try {
+    const [rows] = await pool.query(`
+      SELECT * FROM subadmin_itr WHERE subadmin_id = ?
+    `, [subadminId]);
+
+    res.json({ data: rows });
+  } catch (error) {
+    console.error('Error fetching taken ITRs:', error);
+    res.status(500).json({ message: 'Failed to fetch taken ITRs' });
   }
 });
 
