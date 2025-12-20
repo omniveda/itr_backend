@@ -73,16 +73,25 @@ router.post('/ca-assessment', upload.array('files', 3), async (req, res) => {
       fileUrls.push(fileUrl);
     }
 
+    // Fetch the itr_id for this customer
+    const [itrRows] = await pool.query('SELECT id FROM itr WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [customer_id]);
+    if (itrRows.length === 0) {
+      return res.status(404).json({ message: 'ITR not found for this customer' });
+    }
+    const itr_id = itrRows[0].id;
+
     // Update the itr table with the three CA doc URLs and status
-    await pool.query('UPDATE itr SET Ca_doc1 = ?, Ca_doc2 = ?, Ca_doc3 = ?, status = ?, superadmin_send = ? WHERE customer_id = ?', [
+    await pool.query('UPDATE itr SET Ca_doc1 = ?, Ca_doc2 = ?, Ca_doc3 = ?, status = ?, superadmin_send = ? WHERE id = ?', [
       fileUrls[0] || null,
       fileUrls[1] || null,
       fileUrls[2] || null,
       'E-verification',
       1,
-      customer_id
+      itr_id
     ]);
-    await pool.query('UPDATE ca_itr status = ? WHERE itr_id = ?', ['E-verification', itr_id]);
+
+    // Update the ca_itr table status
+    await pool.query('UPDATE ca_itr SET status = ? WHERE itr_id = ?', ['E-verification', itr_id]);
 
     res.json({ message: 'Assessments uploaded successfully', urls: fileUrls });
   } catch (error) {

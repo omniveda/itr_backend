@@ -121,19 +121,19 @@ router.get('/', async (req, res) => {
 
 // Assign CA to a customer
 router.post('/assign', async (req, res) => {
-  const { customer_id, subadmin_id, agent_id, ca_id } = req.body;
-  if (!customer_id || !subadmin_id || !agent_id || !ca_id) {
+  const { itr_id, subadmin_id, agent_id, ca_id } = req.body;
+  if (!itr_id || !subadmin_id || !agent_id || !ca_id) {
     return res.status(400).json({ message: 'Missing required fields' });
   }
   try {
     // Check if already assigned
-    const [existing] = await pool.query('SELECT * FROM ca_itr WHERE customer_id = ?', [customer_id]);
+    const [existing] = await pool.query('SELECT * FROM ca_itr WHERE itr_id = ?', [itr_id]);
     if (existing.length > 0) {
-      return res.status(409).json({ message: 'CA already assigned for this customer' });
+      return res.status(409).json({ message: 'CA already assigned for this ITR' });
     }
     await pool.query(
-      'INSERT INTO ca_itr (customer_id, subadmin_id, agent_id, ca_id) VALUES (?, ?, ?, ?)',
-      [customer_id, subadmin_id, agent_id, ca_id]
+      'INSERT INTO ca_itr (itr_id, subadmin_id, agent_id, ca_id) VALUES (?, ?, ?, ?)',
+      [itr_id, subadmin_id, agent_id, ca_id]
     );
     res.json({ message: 'CA assigned successfully' });
   } catch (error) {
@@ -142,18 +142,18 @@ router.post('/assign', async (req, res) => {
   }
 });
 
-// Get assigned CA for a customer
-router.get('/assigned/:customer_id', async (req, res) => {
-  const { customer_id } = req.params;
+// Get assigned CA for an ITR
+router.get('/assigned/:itr_id', async (req, res) => {
+  const { itr_id } = req.params;
   try {
     const [rows] = await pool.query(
       `SELECT ca.id, ca.name, ca.email, ca.mobile_no FROM ca_itr
        JOIN ca ON ca_itr.ca_id = ca.id
-       WHERE ca_itr.customer_id = ?`,
-      [customer_id]
+       WHERE ca_itr.itr_id = ?`,
+      [itr_id]
     );
     if (rows.length === 0) {
-      return res.status(404).json({ message: 'No CA assigned for this customer' });
+      return res.status(404).json({ message: 'No CA assigned for this ITR' });
     }
     res.json(rows[0]);
   } catch (error) {
@@ -174,7 +174,7 @@ router.post('/reject-itr', authenticateCA, async (req, res) => {
   try {
     // Check if the CA is assigned to this ITR
     const [assignment] = await pool.query(
-      'SELECT * FROM ca_itr WHERE ca_id = ? AND customer_id = (SELECT customer_id FROM itr WHERE id = ?)',
+      'SELECT * FROM ca_itr WHERE ca_id = ? AND itr_id = ?',
       [caId, itr_id]
     );
 
@@ -187,6 +187,8 @@ router.post('/reject-itr', authenticateCA, async (req, res) => {
       'UPDATE itr SET status = ?, comment = ? WHERE id = ?',
       ['Rejected', reason, itr_id]
     );
+
+    await pool.query('UPDATE ca_itr SET status = ? WHERE itr_id = ?', ['Rejected', itr_id]);
 
     res.json({ message: 'ITR rejected successfully' });
   } catch (error) {

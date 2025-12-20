@@ -489,6 +489,8 @@ router.post('/reapply-itr/:customerId', authenticateToken, async (req, res) => {
     // Update status to Sent to Subadmin and clear comment field
     await pool.query('UPDATE itr SET status = ?, Comment = ? WHERE customer_id = ?', ['Pending', '', customerId]);
 
+    await pool.query('UPDATE ca_itr SET status = ? WHERE itr_id = ?',['Filled',itrId]);
+
     // Remove from subadmin_itr so it can be "Taken" again
     // await pool.query('DELETE FROM subadmin_itr WHERE itr_id = ?', [rows[0].id]);
 

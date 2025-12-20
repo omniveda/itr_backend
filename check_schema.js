@@ -3,9 +3,8 @@ import { pool, initDb } from './db.js';
 async function checkSchema() {
     try {
         await initDb();
-        const [cols] = await pool.query('DESCRIBE ca_itr');
-        console.log('--- ca_itr ---');
-        cols.forEach(f => console.log(`${f.Field}: ${f.Type}`));
+        const [rows] = await pool.query('SHOW CREATE TABLE ca_itr');
+        console.log(rows[0]['Create Table']);
         process.exit(0);
     } catch (error) {
         console.error('Error:', error);

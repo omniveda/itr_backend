@@ -556,19 +556,22 @@ router.get('/customers', requireSuperadmin, async (req, res) => {
     let params = [];
 
     if (caId) {
-      query += ` LEFT JOIN ca_itr ci ON c.id = ci.customer_id AND ci.ca_id = ?`;
+      query = `
+        SELECT c.*, MAX(si.subadmin_id) as assignedSubadminId, MAX(ci.ca_id) as assignedCAId
+        FROM customer c
+        LEFT JOIN itr i ON c.id = i.customer_id
+        LEFT JOIN subadmin_itr si ON i.id = si.itr_id
+        LEFT JOIN ca_itr ci ON i.id = ci.itr_id AND ci.ca_id = ?
+        GROUP BY c.id
+      `;
       params.push(caId);
     }
 
     const [customers] = await pool.query(query, params);
 
-    // If caId is provided, add assignedCAId
+    // If caId is provided, the query already has assignedCAId
     if (caId) {
-      const customersWithCA = customers.map(customer => ({
-        ...customer,
-        assignedCAId: customer.ca_id || null // Assuming the join adds ca_id if assigned
-      }));
-      res.json(customersWithCA);
+      res.json(customers);
     } else {
       res.json(customers);
     }
@@ -667,7 +670,7 @@ router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
 router.get('/itrs', requireSuperadmin, async (req, res) => {
   try {
     const [itrs] = await pool.query(`
-      SELECT itr.id, customer.name as customer_name, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check, itr.Superadmin_doc1
+      SELECT itr.id, customer.name as customer_name,customer.father_name,customer.pan_number,customer.dob,customer.adhar_number,customer.mobile_no,customer.account_number,customer.bank_name,customer.ifsc_code,customer.mail_id,customer.tds_amount,customer.itr_password,customer.income_type,customer.filling_type,customer.last_ay_income,customer.profile_photo,customer.attachments_1,customer.attachments_2,customer.attachments_3,customer.attachments_4,customer.attachments_5,customer.income_slab,customer.comment_box,customer.customer_type, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check, itr.Superadmin_doc1
       FROM itr
       LEFT JOIN customer ON itr.customer_id = customer.id
     `);
@@ -804,11 +807,18 @@ router.post('/cas/allot-customers', requireSuperadmin, async (req, res) => {
       return res.status(404).json({ error: 'One or more customers not found' });
     }
 
-    // Insert records into ca_itr table (only ca_id and customer_id, leave other fields blank)
-    const values = customerIds.map(customerId => [customerId, caId]);
-    await pool.query('INSERT INTO ca_itr (customer_id, ca_id) VALUES ?', [values]);
+    // Get the latest ITR for each customer that is marked to be sent to CA
+    const [itrs] = await pool.query('SELECT id FROM itr WHERE customer_id IN (?) ORDER BY id DESC', [customerIds]);
 
-    res.json({ message: 'Customers allotted to CA successfully' });
+    if (itrs.length === 0) {
+      return res.status(404).json({ error: 'No ITRs found for these customers' });
+    }
+
+    // Insert records into ca_itr table
+    const values = itrs.map(itr => [itr.id, caId]);
+    await pool.query('INSERT INTO ca_itr (itr_id, ca_id) VALUES ?', [values]);
+
+    res.json({ message: 'Customers/ITRs allotted to CA successfully' });
   } catch (error) {
     console.error('Error allotting customers to CA:', error);
     res.status(500).json({ error: 'Failed to allot customers to CA' });
@@ -820,14 +830,14 @@ router.delete('/cas/:caId/allot-customers/:customerId', requireSuperadmin, async
   const { caId, customerId } = req.params;
 
   try {
-    // Verify the allotment exists
-    const [rows] = await pool.query('SELECT id FROM ca_itr WHERE customer_id = ? AND ca_id = ?', [customerId, caId]);
+    // Verify the allotment exists via ITRs
+    const [rows] = await pool.query('SELECT ci.id FROM ca_itr ci JOIN itr i ON ci.itr_id = i.id WHERE i.customer_id = ? AND ci.ca_id = ?', [customerId, caId]);
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Customer allotment not found' });
     }
 
     // Delete the allotment record
-    await pool.query('DELETE FROM ca_itr WHERE customer_id = ? AND ca_id = ?', [customerId, caId]);
+    await pool.query('DELETE ci FROM ca_itr ci JOIN itr i ON ci.itr_id = i.id WHERE i.customer_id = ? AND ci.ca_id = ?', [customerId, caId]);
 
     res.json({ message: 'Customer allotment removed successfully' });
   } catch (error) {
@@ -1004,7 +1014,7 @@ router.get('/flow', requireSuperadmin, async (req, res) => {
       LEFT JOIN agent ON itr.agent_id = agent.id
       LEFT JOIN subadmin_itr ON itr.id = subadmin_itr.itr_id
       LEFT JOIN subadmin ON subadmin_itr.subadmin_id = subadmin.id
-      LEFT JOIN ca_itr ON itr.customer_id = ca_itr.customer_id
+      LEFT JOIN ca_itr ON itr.id = ca_itr.itr_id
       LEFT JOIN ca ON ca_itr.ca_id = ca.id
     `);
 
