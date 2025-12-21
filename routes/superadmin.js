@@ -256,6 +256,26 @@ router.put('/subadmins/:id/reject-permission', requireSuperadmin, async (req, re
   }
 });
 
+// Toggle ca reject permission
+router.put('/cas/:id/reject-permission', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Get current status
+    const [rows] = await pool.query('SELECT reject FROM ca WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'CA not found' });
+    }
+    const currentStatus = rows[0].reject;
+    const newStatus = !currentStatus; // Toggle boolean
+
+    await pool.query('UPDATE ca SET reject = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: `CA reject permission ${newStatus ? 'enabled' : 'disabled'} successfully`, reject: newStatus });
+  } catch (error) {
+    console.error('Error toggling CA reject permission:', error);
+    res.status(500).json({ error: 'Failed to toggle reject permission' });
+  }
+});
+
 // Delete a subadmin
 router.delete('/subadmins/:id', requireSuperadmin, async (req, res) => {
   const { id } = req.params;
@@ -423,11 +443,11 @@ router.put('/subadmins/:id/status', requireSuperadmin, async (req, res) => {
 router.get('/cas', requireSuperadmin, async (req, res) => {
   try {
     const [cas] = await pool.query(`
-      SELECT c.id, c.name, c.username, c.email, c.isca,
+      SELECT c.id, c.name, c.username, c.email, c.isca, c.reject,
              GROUP_CONCAT(cp.permission SEPARATOR ',') as permissions
       FROM ca c
       LEFT JOIN ca_permissions cp ON c.id = cp.ca_id
-      GROUP BY c.id, c.name, c.username, c.email, c.isca
+      GROUP BY c.id, c.name, c.username, c.email, c.isca, c.reject
     `);
     // Parse permissions string into array
     const result = cas.map(ca => ({
