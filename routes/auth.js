@@ -120,7 +120,8 @@ router.post('/login', async (req, res) => {
         subadmin: {
           id: subadminUser.id,
           username: subadminUser.username,
-          issubadmin: subadminUser.issubadmin
+          issubadmin: subadminUser.issubadmin,
+          reject: subadminUser.reject
         }
       });
     } else {
@@ -154,7 +155,8 @@ router.post('/login', async (req, res) => {
           alternate_mobile_no: agent.alternate_mobile_no,
           wbalance: agent.wbalance,
           isagent: agent.isagent,
-          file_charge: agent.file_charge
+          file_charge: agent.file_charge,
+          isdownload: agent.isdownload,
         }
       });
     }
@@ -187,13 +189,13 @@ router.get('/me', async (req, res) => {
       }
       res.json({ ca: rows[0] });
     } else if (decoded.issubadmin) {
-      const [rows] = await pool.query('SELECT id, username, issubadmin FROM subadmin WHERE id = ?', [decoded.id]);
+      const [rows] = await pool.query('SELECT id, username, issubadmin, reject FROM subadmin WHERE id = ?', [decoded.id]);
       if (rows.length === 0) {
         return res.status(404).json({ message: 'Subadmin not found' });
       }
       res.json({ subadmin: rows[0] });
     } else {
-      const [rows] = await pool.query('SELECT id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, wbalance, file_charge, isagent FROM agent WHERE id = ?', [decoded.id]);
+      const [rows] = await pool.query('SELECT id, name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, wbalance, file_charge, isdownload, isagent FROM agent WHERE id = ?', [decoded.id]);
       console.log('Agent query result:', rows.length, 'rows found');
       if (rows.length === 0) {
         return res.status(404).json({ message: 'Agent not found' });

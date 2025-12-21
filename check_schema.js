@@ -3,8 +3,10 @@ import { pool, initDb } from './db.js';
 async function checkSchema() {
     try {
         await initDb();
-        const [rows] = await pool.query('SHOW CREATE TABLE ca_itr');
-        console.log(rows[0]['Create Table']);
+        const [itr] = await pool.query('DESCRIBE itr');
+        const [customer] = await pool.query('DESCRIBE customer');
+        console.log('ITR Schema:', itr);
+        console.log('Customer Schema:', customer);
         process.exit(0);
     } catch (error) {
         console.error('Error:', error);

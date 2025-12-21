@@ -50,7 +50,7 @@ const requireSuperadmin = (req, res, next) => {
 router.get('/agents', requireSuperadmin, async (req, res) => {
   try {
     const [agents] = await pool.query(`
-      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.file_charge, a.wbalance,
+      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.file_charge, a.wbalance, a.isdownload,
              ap.permissions
       FROM agent a
       LEFT JOIN agent_permissions ap ON a.id = ap.agent_id
@@ -103,6 +103,26 @@ router.put('/agents/:id/verify', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Toggle agent download status
+router.put('/agents/:id/download-status', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Get current status
+    const [rows] = await pool.query('SELECT isdownload FROM agent WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+    const currentStatus = rows[0].isdownload;
+    const newStatus = currentStatus === 'verified' ? 'unverified' : 'verified';
+
+    await pool.query('UPDATE agent SET isdownload = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: `Agent download ${newStatus} successfully`, status: newStatus });
+  } catch (error) {
+    console.error('Error toggling agent download status:', error);
+    res.status(500).json({ error: 'Failed to toggle download status' });
+  }
+});
+
 // Adjust agent wallet balance
 router.put('/agents/:id/wallet', requireSuperadmin, async (req, res) => {
   const { id } = req.params;
@@ -145,11 +165,11 @@ router.put('/agents/:id', requireSuperadmin, async (req, res) => {
 router.get('/subadmins', requireSuperadmin, async (req, res) => {
   try {
     const [subadmins] = await pool.query(`
-      SELECT s.id, s.username, s.issubadmin,
+      SELECT s.id, s.username, s.issubadmin, s.reject, s.isdownload,
              GROUP_CONCAT(sp.permission SEPARATOR ',') as permissions
       FROM subadmin s
       LEFT JOIN subadmin_permissions sp ON s.id = sp.subadmin_id
-      GROUP BY s.id, s.username, s.issubadmin
+      GROUP BY s.id, s.username, s.issubadmin, s.reject, s.isdownload
     `);
     // Parse permissions string into array
     const result = subadmins.map(subadmin => ({
@@ -213,6 +233,26 @@ router.put('/subadmins/:id', requireSuperadmin, async (req, res) => {
     } else {
       res.status(500).json({ error: 'Failed to update subadmin' });
     }
+  }
+});
+
+// Toggle subadmin reject permission
+router.put('/subadmins/:id/reject-permission', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Get current status
+    const [rows] = await pool.query('SELECT reject FROM subadmin WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Subadmin not found' });
+    }
+    const currentStatus = rows[0].reject;
+    const newStatus = !currentStatus; // Toggle boolean
+
+    await pool.query('UPDATE subadmin SET reject = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: `Subadmin reject permission ${newStatus ? 'enabled' : 'disabled'} successfully`, reject: newStatus });
+  } catch (error) {
+    console.error('Error toggling subadmin reject permission:', error);
+    res.status(500).json({ error: 'Failed to toggle reject permission' });
   }
 });
 
@@ -825,6 +865,42 @@ router.post('/cas/allot-customers', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Assign or Change CA for an ITR
+router.put('/assign-ca/:itrId', requireSuperadmin, async (req, res) => {
+  const { itrId } = req.params;
+  const { caId } = req.body;
+
+  if (!caId) {
+    return res.status(400).json({ error: 'caId is required' });
+  }
+
+  try {
+    // 1. Verify CA exists
+    const [caRows] = await pool.query('SELECT id, name FROM ca WHERE id = ?', [caId]);
+    if (caRows.length === 0) {
+      return res.status(404).json({ error: 'CA not found' });
+    }
+
+    // 2. Update ITR table status and ca info
+    await pool.query(
+      'UPDATE itr SET ca_id = ?, ca_send = TRUE, status = "Filled" WHERE id = ?',
+      [caId, itrId]
+    );
+
+    // 3. Insert or update ca_itr assignment
+    await pool.query(`
+      INSERT INTO ca_itr (itr_id, ca_id, status)
+      VALUES (?, ?, 'Filled')
+      ON DUPLICATE KEY UPDATE ca_id = VALUES(ca_id), status = 'Filled'
+    `, [itrId, caId]);
+
+    res.json({ message: 'CA assigned/updated successfully', caName: caRows[0].name });
+  } catch (error) {
+    console.error('Error assigning CA to ITR:', error);
+    res.status(500).json({ error: 'Failed to assign CA to ITR' });
+  }
+});
+
 // Remove customer allotment from CA
 router.delete('/cas/:caId/allot-customers/:customerId', requireSuperadmin, async (req, res) => {
   const { caId, customerId } = req.params;
@@ -1041,6 +1117,79 @@ router.get('/flow', requireSuperadmin, async (req, res) => {
   } catch (error) {
     console.error('Error fetching flow data:', error);
     res.status(500).json({ error: 'Failed to fetch flow data' });
+  }
+});
+
+// Delete a specific document reference
+router.delete('/itr/:itrId/document/:fieldName', requireSuperadmin, async (req, res) => {
+  const { itrId, fieldName } = req.params;
+
+  // Define which fields belong to which table
+  const itrFields = ['Ca_doc1', 'Ca_doc2', 'Ca_doc3', 'Subadmin_doc1', 'Subadmin_doc2', 'Superadmin_doc1'];
+  const customerFields = ['attachments_1', 'attachments_2', 'attachments_3', 'attachments_4', 'attachments_5'];
+
+  try {
+    if (itrFields.includes(fieldName)) {
+      await pool.query(`UPDATE itr SET ${fieldName} = NULL WHERE id = ?`, [itrId]);
+    } else if (customerFields.includes(fieldName)) {
+      await pool.query(`
+        UPDATE customer c
+        JOIN itr i ON c.id = i.customer_id
+        SET c.${fieldName} = NULL
+        WHERE i.id = ?
+      `, [itrId]);
+    } else {
+      return res.status(400).json({ error: 'Invalid document field' });
+    }
+
+    res.json({ message: 'Document reference removed successfully' });
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    res.status(500).json({ error: 'Failed to delete document' });
+  }
+});
+
+// Re-upload a document
+router.put('/itr/:itrId/document/:fieldName', requireSuperadmin, upload.single('document'), async (req, res) => {
+  const { itrId, fieldName } = req.params;
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  const itrFields = ['Ca_doc1', 'Ca_doc2', 'Ca_doc3', 'Subadmin_doc1', 'Subadmin_doc2', 'Superadmin_doc1'];
+  const customerFields = ['attachments_1', 'attachments_2', 'attachments_3', 'attachments_4', 'attachments_5'];
+
+  try {
+    // Generate file path and URL (consistent with upload.js)
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const ext = path.extname(req.file.originalname) || '.pdf';
+    const fileName = `reupload_${itrId}_${fieldName}_${Date.now()}${ext}`;
+    const filePath = path.join(uploadsDir, fileName);
+
+    fs.writeFileSync(filePath, req.file.buffer);
+    const fileUrl = `${fileName}`;
+
+    if (itrFields.includes(fieldName)) {
+      await pool.query(`UPDATE itr SET ${fieldName} = ? WHERE id = ?`, [fileUrl, itrId]);
+    } else if (customerFields.includes(fieldName)) {
+      await pool.query(`
+        UPDATE customer c
+        JOIN itr i ON c.id = i.customer_id
+        SET c.${fieldName} = ?
+        WHERE i.id = ?
+      `, [fileUrl, itrId]);
+    } else {
+      return res.status(400).json({ error: 'Invalid document field' });
+    }
+
+    res.json({ message: 'Document uploaded successfully', url: fileUrl });
+  } catch (error) {
+    console.error('Error uploading document:', error);
+    res.status(500).json({ error: 'Failed to upload document' });
   }
 });
 
