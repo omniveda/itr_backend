@@ -455,4 +455,19 @@ router.get('/sent-to-subadmin', authenticateToken, async (req, res) => {
   }
 });
 
+// Check if PAN number already exists
+router.get('/check-pan/:pan_number', authenticateToken, async (req, res) => {
+  const { pan_number } = req.params;
+  try {
+    const [rows] = await pool.query(
+      'SELECT id FROM customer WHERE pan_number = ? AND agent_id = ?',
+      [pan_number, req.agentId]
+    );
+    res.json({ exists: rows.length > 0 });
+  } catch (error) {
+    console.error('Error checking PAN:', error);
+    res.status(500).json({ message: 'Failed to check PAN number' });
+  }
+});
+
 export default router;
