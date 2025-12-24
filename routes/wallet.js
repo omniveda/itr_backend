@@ -325,9 +325,35 @@ router.get('/superadmin/wallets', authenticateToken, requireSuperadmin, async (r
 router.get('/superadmin/wallet/:agentId/transactions', authenticateToken, requireSuperadmin, async (req, res) => {
   try {
     const { agentId } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    let { page = 1, limit = 10, transactionType, startDate, endDate } = req.query;
+
+    // Handle "all" limit for PDF export
+    if (limit === 'all') {
+      limit = 1000000;
+    } else {
+      limit = parseInt(limit);
+    }
+
+    page = parseInt(page);
     const offset = (page - 1) * limit;
+
+    let whereClause = 'WHERE wt.agent_id = ?';
+    const queryParams = [agentId];
+
+    if (transactionType && (transactionType === 'credit' || transactionType === 'debit')) {
+      whereClause += ' AND wt.transaction_type = ?';
+      queryParams.push(transactionType);
+    }
+
+    if (startDate) {
+      whereClause += ' AND wt.created_at >= ?';
+      queryParams.push(`${startDate} 00:00:00`);
+    }
+
+    if (endDate) {
+      whereClause += ' AND wt.created_at <= ?';
+      queryParams.push(`${endDate} 23:59:59`);
+    }
 
     // Get transactions by agent_id
     const [transactions] = await pool.query(
@@ -338,16 +364,16 @@ router.get('/superadmin/wallet/:agentId/transactions', authenticateToken, requir
               END as description
        FROM wallet_transactions wt
        LEFT JOIN itr i ON wt.reference_id = i.id AND wt.reference_type = 'itr_payment'
-       WHERE wt.agent_id = ?
+       ${whereClause}
        ORDER BY wt.created_at DESC
        LIMIT ? OFFSET ?`,
-      [agentId, limit, offset]
+      [...queryParams, limit, offset]
     );
 
     // Get total count
     const [countRows] = await pool.query(
-      'SELECT COUNT(*) as total FROM wallet_transactions WHERE agent_id = ?',
-      [agentId]
+      `SELECT COUNT(*) as total FROM wallet_transactions wt ${whereClause}`,
+      queryParams
     );
 
     res.json({

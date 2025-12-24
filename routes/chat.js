@@ -159,8 +159,34 @@ router.post('/rooms/:id/messages', authenticateToken, async (req, res) => {
   const user = req.user;
   if (!message) return res.status(400).json({ message: 'Message text is required' });
   try {
-    const [result] = await pool.query('INSERT INTO chat_messages (room_id, sender_id, message) VALUES (?, ?, ?)', [roomId, user.id, message]);
+    // Determine sender name and role
+    let sender_name = 'Unknown';
+    let sender_role = 'Member';
+
+    if (user.issuperadmin) {
+      sender_role = 'Superadmin';
+      const [rows] = await pool.query('SELECT username FROM superadmin WHERE id = ?', [user.id]);
+      if (rows.length > 0) sender_name = rows[0].username;
+    } else if (user.issubadmin) {
+      sender_role = 'Subadmin';
+      const [rows] = await pool.query('SELECT username FROM subadmin WHERE id = ?', [user.id]);
+      if (rows.length > 0) sender_name = rows[0].username;
+    } else if (user.isCA) {
+      sender_role = 'CA';
+      const [rows] = await pool.query('SELECT name FROM ca WHERE id = ?', [user.id]);
+      if (rows.length > 0) sender_name = rows[0].name;
+    } else if (user.isagent) {
+      sender_role = 'Agent';
+      const [rows] = await pool.query('SELECT name FROM agent WHERE id = ?', [user.id]);
+      if (rows.length > 0) sender_name = rows[0].name;
+    }
+
+    const [result] = await pool.query(
+      'INSERT INTO chat_messages (room_id, sender_id, message, sender_name, sender_role) VALUES (?, ?, ?, ?, ?)',
+      [roomId, user.id, message, sender_name, sender_role]
+    );
     const messageId = result.insertId;
+
     // emit via socket if present
     const io = req.app.get('io');
     if (io) {
@@ -169,6 +195,8 @@ router.post('/rooms/:id/messages', authenticateToken, async (req, res) => {
         room_id: Number(roomId),
         sender_id: user.id,
         message,
+        sender_name,
+        sender_role,
         timestamp: new Date().toISOString(),
       });
     }
