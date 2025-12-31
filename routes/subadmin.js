@@ -247,7 +247,7 @@ router.put('/update-customer/:customerId', authenticateToken, async (req, res) =
   console.log("customer id", customerId, "update data", updates);
 
   // Protected fields that subadmin cannot update
-  const protectedFields = ['pan_number', 'adhar_number', 'name', 'mobile_no', 'dob', 'asst_year', 'customer_id', 'created_at', 'updated_at', 'agentedit', 'status', 'ca_upload', 'subadmin_send', 'ca_send', 'ca_id', 'superadmin_send', 'otp_check', 'Subadmin_doc1', 'Subadmin_doc2'];
+  const protectedFields = ['pan_number', 'adhar_number', 'name', 'mobile_no', 'dob', 'asst_year', 'customer_id', 'created_at', 'updated_at', 'agentedit', 'status', 'ca_upload', 'subadmin_send', 'ca_send', 'ca_id', 'superadmin_send', 'otp_check', 'Subadmin_doc1', 'Subadmin_doc2','Ca_doc1','Ca_doc2','Ca_doc3','Superadmin_doc1','Comment', 'itr_id'];
 
   // Remove protected fields from updates
   protectedFields.forEach(field => delete updates[field]);
