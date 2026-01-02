@@ -19,6 +19,7 @@ import chatRoutes from './routes/chat.js';
 import walletRoutes from './routes/wallet.js';
 import agentRoutes from './routes/agent.js';
 import subadminEverificationRoutes from './routes/subadminEverification.js';
+import ratecardRoutes from './routes/ratecard.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,6 +68,7 @@ app.use('/messages', messageRoutes);
 app.use('/chat', chatRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/subadmin-everification', subadminEverificationRoutes);
+app.use('/ratecard', ratecardRoutes);
 // app.use('/agent', agentRoutes);
 
 // Serve static files from backend/uploads directory
