@@ -21,20 +21,16 @@ const authenticateToken = (req, res, next) => {
 
 // Process payment
 router.post('/process', authenticateToken, async (req, res) => {
-  const { customerIds, amount, paymentMethod, yearswithcustomers,customerAsstYears } = req.body;
+  const { customerIds, amount, paymentMethod, yearswithcustomers, customerAsstYears } = req.body;
   console.log("asst year", req.body);
-  console.log("customer asst year",customerAsstYears[customerIds]);
-  
+  console.log("customer asst year", customerAsstYears[customerIds]);
+  console.log("customerIds", customerIds);
 
 
   if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0 || !amount || !paymentMethod) {
     return res.status(400).json({ message: 'Customer IDs array, amount, and payment method are required' });
   }
 
-  const customerYearPairs = customerIds.map((customerId, index) => ({
-  customerId,
-  asstYear: yearswithcustomers[index]
-}));
 
   if (!['wallet', 'razorpay'].includes(paymentMethod)) {
     return res.status(400).json({ message: 'Invalid payment method' });
@@ -59,7 +55,7 @@ router.post('/process', authenticateToken, async (req, res) => {
       try {
         // Check agent balance with lock
         const [agentRows] = await pool.query(
-          'SELECT wbalance FROM agent WHERE id = ? FOR UPDATE',
+          'SELECT wbalance, file_charge FROM agent WHERE id = ? FOR UPDATE',
           [req.agentId]
         );
 
@@ -68,80 +64,113 @@ router.post('/process', authenticateToken, async (req, res) => {
           return res.status(404).json({ message: 'Agent not found' });
         }
 
-        const currentBalance = agentRows[0].wbalance || 0;
+        const currentBalance = parseFloat(agentRows[0].wbalance) || 0;
+        const fileCharge = parseFloat(agentRows[0].file_charge) || 0;
 
-        if (currentBalance < amount) {
+        let totalAmountToDeduct = 0;
+        const customerPaymentsBreakdown = [];
+
+        // Calculate breakdown for each customer
+        for (const customerId of customerIds) {
+          // Get customer income_slab
+          const [customerRows] = await pool.query('SELECT income_slab FROM customer WHERE id = ?', [customerId]);
+          const income_slab = customerRows[0]?.income_slab;
+          const asstYear = (customerAsstYears && customerAsstYears[customerId]) ||
+            (yearswithcustomers && yearswithcustomers[customerIds.indexOf(customerId)]) ||
+            '2025-26';
+
+          // Get penalty from ratecard
+          const [rateRows] = await pool.query(
+            `SELECT penalty_amount FROM ratecard 
+             WHERE income_slab = ? AND assessment_year = ? 
+             AND CURDATE() BETWEEN calendar_from AND calendar_to LIMIT 1`,
+            [income_slab, asstYear]
+          );
+          const penalty = rateRows.length > 0 ? parseFloat(rateRows[0].penalty_amount) : 0;
+          const individualAmount = fileCharge + penalty;
+
+          totalAmountToDeduct += individualAmount;
+          customerPaymentsBreakdown.push({
+            customerId,
+            amount: individualAmount,
+            asstYear
+          });
+        }
+
+        if (currentBalance < totalAmountToDeduct) {
           await pool.query('ROLLBACK');
-          return res.status(400).json({ message: 'Insufficient wallet balance' });
+          return res.status(400).json({ message: `Insufficient wallet balance. Required: ₹${totalAmountToDeduct}, Available: ₹${currentBalance}` });
         }
 
         // Deduct from wallet
         await pool.query(
           'UPDATE agent SET wbalance = wbalance - ? WHERE id = ?',
-          [amount, req.agentId]
+          [totalAmountToDeduct, req.agentId]
         );
 
-        const amountPerCustomer = parseFloat(amount) / customerIds.length;
+        let runningBalance = currentBalance;
 
-        // Create payment records for each customer
-        const paymentValues = customerYearPairs.map(customeryearpair => [
-          req.agentId,
-          customeryearpair.customerId,
-          amount / customerIds.length, // Assuming equal split, but since amount is total, adjust if needed
-          paymentMethod,
-          customeryearpair.asstYear
-        ]);
-        const placeholdersInsert = paymentValues.map(() => '(?, ?, ?, TRUE, ?,?)').join(',');
-        const flatValues = paymentValues.flat();
+        // Create individual records for each customer
+        for (const paymentData of customerPaymentsBreakdown) {
+          const [paymentResult] = await pool.query(
+            `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method, asst_year) 
+             VALUES (?, ?, ?, TRUE, ?, ?)`,
+            [req.agentId, paymentData.customerId, paymentData.amount, paymentMethod, paymentData.asstYear]
+          );
 
-        const [payment] = await pool.query(
-          `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method,asst_year) VALUES ${placeholdersInsert}`,
-          flatValues
-        );
-        console.log("payemnt",payment);
+          const balanceBefore = runningBalance;
+          const balanceAfter = runningBalance - paymentData.amount;
+          runningBalance = balanceAfter;
 
-        const balanceBeforeTxn = currentBalance;
-        const balanceAfterTxn = currentBalance - amountPerCustomer;
-
-        const [txnResult] = await pool.query(
+          // Transaction record for each customer
+          await pool.query(
             `INSERT INTO wallet_transactions 
              (agent_id, performed_by, transaction_type, amount, balance_before, balance_after, reference_type, reference_id, description)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [ req.agentId, req.agentId, 'debit', amountPerCustomer, balanceBeforeTxn, balanceAfterTxn, 'itr_payment', payment.insertId, 'ITR Payment']
+            [req.agentId, req.agentId, 'debit', paymentData.amount, balanceBefore, balanceAfter, 'itr_payment', paymentResult.insertId, `ITR Payment for ${paymentData.asstYear}`]
           );
+        }
 
         await pool.query('COMMIT');
-        res.json({ message: 'Payment processed successfully via wallet' });
+        res.json({ message: 'Payment processed successfully via wallet', totalDeducted: totalAmountToDeduct });
       } catch (error) {
         await pool.query('ROLLBACK');
-        throw error;
+        console.error('Error during wallet payment transaction:', error);
+        res.status(500).json({ message: 'Payment processing failed in transaction' });
       }
     } else if (paymentMethod === 'razorpay') {
-      // For Razorpay, we'll create pending payment records
-      // The actual payment completion will be handled by webhook or frontend callback
-      const paymentValues = customerIds.map(customerId => [
-        req.agentId,
-        customerId,
-        amount / customerIds.length, // Assuming equal split
-        paymentMethod
-      ]);
-      const placeholdersInsert = paymentValues.map(() => '(?, ?, ?, FALSE, ?)').join(',');
-      const flatValues = paymentValues.flat();
+      // For Razorpay, we'll create pending payment records using the breakdown
+      const [agentRows] = await pool.query('SELECT file_charge FROM agent WHERE id = ?', [req.agentId]);
+      const fileCharge = parseFloat(agentRows[0]?.file_charge || 0);
 
-      const [result] = await pool.query(
-        `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method) VALUES ${placeholdersInsert}`,
-        flatValues
-      );
+      const paymentRecords = [];
+      for (const customerId of customerIds) {
+        const [customerRows] = await pool.query('SELECT income_slab FROM customer WHERE id = ?', [customerId]);
+        const income_slab = customerRows[0]?.income_slab;
+        const asstYear = (customerAsstYears && customerAsstYears[customerId]) ||
+          (yearswithcustomers && yearswithcustomers[customerIds.indexOf(customerId)]) ||
+          '2025-26';
 
-      // Get inserted payment IDs (assuming auto-increment)
-      const paymentIds = [];
-      for (let i = 0; i < customerIds.length; i++) {
-        paymentIds.push(result.insertId + i);
+        const [rateRows] = await pool.query(
+          `SELECT penalty_amount FROM ratecard 
+           WHERE income_slab = ? AND assessment_year = ? 
+           AND CURDATE() BETWEEN calendar_from AND calendar_to LIMIT 1`,
+          [income_slab, asstYear]
+        );
+        const penalty = rateRows.length > 0 ? parseFloat(rateRows[0].penalty_amount) : 0;
+        const individualAmount = fileCharge + penalty;
+
+        const [result] = await pool.query(
+          `INSERT INTO payment (agent_id, customer_id, amount, paid, payment_method, asst_year) 
+           VALUES (?, ?, ?, FALSE, ?, ?)`,
+          [req.agentId, customerId, individualAmount, paymentMethod, asstYear]
+        );
+        paymentRecords.push(result.insertId);
       }
 
       res.json({
         message: 'Payment initiated via Razorpay',
-        paymentIds
+        paymentIds: paymentRecords
       });
     }
 
@@ -283,7 +312,7 @@ router.get('/check-status/:customerId', authenticateToken, async (req, res) => {
     const hasPaid = paymentRows.length > 0 && paymentRows[0].paid;
     console.log(paymentRows);
 
-    res.json({ paymentRows});
+    res.json({ paymentRows });
   } catch (error) {
     console.error('Error checking payment status:', error);
     res.status(500).json({ message: 'Failed to check payment status' });

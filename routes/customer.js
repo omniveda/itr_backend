@@ -333,7 +333,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
 // Send selected customers to subadmin with assessment year
 router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
-  const { customersWithYears, subadmin_id } = req.body;
+  const { customersWithYears, subadmin_id, formData } = req.body;
 
   if (!customersWithYears || !Array.isArray(customersWithYears) || customersWithYears.length === 0) {
     return res.status(400).json({ message: 'Customers with years are required' });
@@ -341,18 +341,20 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
 
   try {
     const customerIds = customersWithYears.map(item => item.customerId);
-    const asstYears = customersWithYears.map(item => item.asstYear);
 
-    // Verify that all customers belong to the agent
+    // Verify that all customers belong to the agent and get their details
     const placeholders = customerIds.map(() => '?').join(',');
     const [customers] = await pool.query(
-      `SELECT id, name, pan_number FROM customer WHERE id IN (${placeholders}) AND agent_id = ?`,
+      `SELECT * FROM customer WHERE id IN (${placeholders}) AND agent_id = ?`,
       [...customerIds, req.agentId]
     );
 
     if (customers.length !== customerIds.length) {
       return res.status(400).json({ message: 'Some customers not found or do not belong to you' });
     }
+
+    // Create a map for easy customer lookup
+    const customerMap = customers.reduce((acc, c) => ({ ...acc, [c.id]: c }), {});
 
     const newEntries = [];
     const alreadySent = [];
@@ -398,33 +400,50 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'All selected customers have already been sent for their respective assessment years' });
     }
 
-    // Insert new records into itr table
-    const values = newEntries.map(entry => [
-      entry.customerId,
-      entry.asstYear,
-      req.agentId,
-      false, // agentedit
-      'Pending', // status,
-      1 // subadmin_send
-    ]);
-    const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?, ?)').join(',');
-    const flatValues = values.flat();
+    await pool.query('START TRANSACTION');
 
-    await pool.query(
-      `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status, subadmin_send) VALUES ${placeholdersInsert}`,
-      flatValues
-    );
+    for (const entry of newEntries) {
+      const { customerId, asstYear } = entry;
+      const customer = customerMap[customerId];
 
-    // Insert into subadmin_itr table for sent customers
-    const newCustomerIds = newEntries.map(entry => entry.customerId);
-    const subadminValues = newCustomerIds.map(id => [id, subadmin_id]);
-    const subadminPlaceholders = subadminValues.map(() => '(?, ?)').join(',');
-    const subadminFlatValues = subadminValues.flat();
-    console.log("subadmin place holder and subadmin flat values", subadminPlaceholders, subadminFlatValues);
-    // await pool.query(
-    //   `INSERT INTO subadmin_itr (customer_id, subadmin_id) VALUES ${subadminPlaceholders}`,
-    //   subadminFlatValues
-    // );
+      // Insert new record into itr table
+      const [itrResult] = await pool.query(
+        `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status, subadmin_send) VALUES (?, ?, ?, ?, ?, ?)`,
+        [customerId, asstYear, req.agentId, false, 'Pending', 1]
+      );
+
+      const itrId = itrResult.insertId;
+
+      // Snapshot values, overriding with formData if available
+      const incomeSlab = formData?.income_slab || customer.income_slab;
+      const fileCharge = formData?.file_charge || customer.file_charge;
+
+      // Insert record into itr_customer table (snapshot)
+      await pool.query(
+        `INSERT INTO itr_customer (
+          itr_id, name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
+          tds_amount, itr_password, asst_year_3yr, income_type, mobile_no, mail_id, filling_type,
+          last_ay_income, profile_photo, user_id, password, attachments_1, attachments_2, attachments_3,
+          attachments_4, attachments_5, attachments_6, file_charge, income_slab, comment_box, customer_type, agent_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          itrId, customer.name, customer.father_name, customer.dob, customer.pan_number, customer.adhar_number, customer.account_number, customer.bank_name, customer.ifsc_code,
+          customer.tds_amount, customer.itr_password, customer.asst_year_3yr, customer.income_type, customer.mobile_no, customer.mail_id, customer.filling_type,
+          customer.last_ay_income, customer.profile_photo, customer.user_id, customer.password, customer.attachments_1, customer.attachments_2, customer.attachments_3,
+          customer.attachments_4, customer.attachments_5, customer.attachments_6, fileCharge, incomeSlab, customer.comment_box, customer.customer_type, customer.agent_id
+        ]
+      );
+
+      // Insert into subadmin_itr table for sent customers
+      if (subadmin_id) {
+        await pool.query(
+          `INSERT INTO subadmin_itr (customer_id, subadmin_id, itr_id) VALUES (?, ?, ?)`,
+          [customerId, subadmin_id, itrId]
+        );
+      }
+    }
+
+    await pool.query('COMMIT');
 
     res.json({
       message: `${newEntries.length} customer(s) sent to subadmin successfully`,
@@ -432,8 +451,9 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
       alreadySentCount: alreadySent.length
     });
   } catch (error) {
+    await pool.query('ROLLBACK');
     console.error('Error sending customers to subadmin:', error);
-    res.status(500).json({ message: '' });
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -467,6 +487,81 @@ router.get('/check-pan/:pan_number', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error checking PAN:', error);
     res.status(500).json({ message: 'Failed to check PAN number' });
+  }
+});
+
+// Get ITR customer snapshot
+router.get('/snapshot/:itrId', authenticateToken, async (req, res) => {
+  const { itrId } = req.params;
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM itr_customer WHERE itr_id = ? AND agent_id = ?',
+      [itrId, req.agentId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Snapshot not found' });
+    }
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error fetching snapshot:', error);
+    res.status(500).json({ message: 'Failed to fetch snapshot' });
+  }
+});
+
+// Update ITR customer snapshot (only if agentedit is allowed)
+router.put('/snapshot/:itrId', authenticateToken, async (req, res) => {
+  const { itrId } = req.params;
+  const updates = req.body;
+
+  try {
+    // Check if agentedit is allowed for this ITR
+    const [itrRows] = await pool.query(
+      'SELECT agentedit FROM itr WHERE id = ? AND agent_id = ?',
+      [itrId, req.agentId]
+    );
+
+    if (itrRows.length === 0) {
+      return res.status(404).json({ message: 'ITR not found' });
+    }
+
+    if (!itrRows[0].agentedit) {
+      return res.status(403).json({ message: 'Edit not allowed for this ITR. Please request permission from subadmin/superadmin.' });
+    }
+
+    const fields = Object.keys(updates);
+    const values = Object.values(updates);
+
+    if (fields.length === 0) {
+      return res.status(400).json({ message: 'No fields to update' });
+    }
+
+    // Filter out restricted fields from snapshot updates
+    const restrictedFields = ['id', 'itr_id', 'agent_id', 'snapshot_date', 'created_at'];
+    const filteredFields = fields.filter(f => !restrictedFields.includes(f));
+    const filteredValues = filteredFields.map(f => updates[f]);
+
+    const setClause = filteredFields.map(field => `${field} = ?`).join(', ');
+
+    await pool.query('START TRANSACTION');
+
+    const [result] = await pool.query(
+      `UPDATE itr_customer SET ${setClause} WHERE itr_id = ? AND agent_id = ?`,
+      [...filteredValues, itrId, req.agentId]
+    );
+
+    // Reset agentedit to 0 after update
+    await pool.query(
+      'UPDATE itr SET agentedit = 0 WHERE id = ? AND agent_id = ?',
+      [itrId, req.agentId]
+    );
+
+    await pool.query('COMMIT');
+
+    res.json({ message: 'ITR snapshot updated successfully' });
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('Error updating snapshot:', error);
+    res.status(500).json({ message: 'Failed to update snapshot' });
   }
 });
 
