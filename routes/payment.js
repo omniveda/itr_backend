@@ -237,20 +237,20 @@ router.post('/complete-razorpay', authenticateToken, async (req, res) => {
 
       if (newEntries.length > 0) {
         // Insert new records into itr table
-        const values = newEntries.map(entry => [
-          entry.customerId,
-          entry.asstYear,
-          req.agentId,
-          false, // agentedit
-          'Pending' // status
-        ]);
-        const placeholdersInsert = values.map(() => '(?, ?, ?, ?, ?)').join(',');
-        const flatValues = values.flat();
+        for (const entry of newEntries) {
+          const [result] = await pool.query(
+            `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status) VALUES (?, ?, ?, ?, ?)`,
+            [entry.customerId, entry.asstYear, req.agentId, false, 'Pending']
+          );
 
-        await pool.query(
-          `INSERT INTO itr (customer_id, asst_year, agent_id, agentedit, status) VALUES ${placeholdersInsert}`,
-          flatValues
-        );
+          const itrId = result.insertId;
+
+          // Initialize flow tracking for each ITR
+          await pool.query(
+            'INSERT INTO itr_flow (itr_id, customer_id, itr_date) VALUES (?, ?, CURRENT_TIMESTAMP)',
+            [itrId, entry.customerId]
+          );
+        }
 
         // Update subadmin_send to true for sent customers
         const newCustomerIds = newEntries.map(entry => entry.customerId);
@@ -335,6 +335,48 @@ router.get('/wallet-balance', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching wallet balance:', error);
     res.status(500).json({ message: 'Failed to fetch wallet balance' });
+  }
+});
+
+// Get full history (payments and rejections) for a specific ITR
+router.get('/itr-history/:itrId', authenticateToken, async (req, res) => {
+  const { itrId } = req.params;
+
+  try {
+    // 1. Get ITR details
+    const [itrRows] = await pool.query(
+      'SELECT customer_id, agent_id, asst_year, created_at FROM itr WHERE id = ?',
+      [itrId]
+    );
+
+    if (itrRows.length === 0) {
+      return res.status(404).json({ message: 'ITR not found' });
+    }
+
+    const { customer_id, agent_id, asst_year, created_at: itr_created_at } = itrRows[0];
+
+    // 2. Get all payments for this customer & asst_year
+    const [paymentRows] = await pool.query(
+      'SELECT id, amount, paid, payment_method, created_at, "payment" as type FROM payment WHERE customer_id = ? AND agent_id = ? AND asst_year = ?',
+      [customer_id, agent_id, asst_year]
+    );
+
+    // 3. Get all rejections for this ITR
+    const [rejectionRows] = await pool.query(
+      'SELECT id, reason, extra_charge, rejected_by_type, created_at, "rejection" as type FROM itr_rejection_history WHERE itr_id = ?',
+      [itrId]
+    );
+
+    // Combine and sort by date
+    const history = [...paymentRows, ...rejectionRows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    res.json({
+      itrDetails: { itrId, customer_id, agent_id, asst_year, itr_created_at },
+      history
+    });
+  } catch (error) {
+    console.error('Error fetching ITR history:', error);
+    res.status(500).json({ message: 'Failed to fetch ITR history' });
   }
 });
 

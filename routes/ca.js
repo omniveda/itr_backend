@@ -31,11 +31,8 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
       WHERE cp.ca_id = ?
     `, [caId]);
 
-    if (permRows.length === 0) {
-      return res.status(404).json({ message: 'No permissions found for this CA' });
-    }
-
-    const permissions = permRows[0];
+    let permissions = permRows.length > 0 ? permRows[0] : null;
+    console.log('CA Permissions:', permissions);
     console.log('CA Permissions:', permissions);
 
     // Build dynamic SELECT fields for ITR and customer
@@ -55,35 +52,39 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
       'itr.Subadmin_doc2'
     ];
 
-    // Add customer fields if permitted
+    // Essential fields for reports/identification (Always Include)
+    selectFields.push('ic.name AS customer_name');
+    selectFields.push('ic.pan_number AS customer_pan_number');
+    selectFields.push('ic.mobile_no AS customer_mobile');
+
+    // Add other customer fields if permitted
     const customerFieldMap = {
-      name: 'c.name AS customer_name',
-      father_name: 'c.father_name AS customer_father_name',
-      dob: 'c.dob AS customer_dob',
-      pan_number: 'c.pan_number AS customer_pan_number',
-      adhar_number: 'c.adhar_number AS customer_adhar_number',
-      account_number: 'c.account_number AS customer_account_number',
-      bank_name: 'c.bank_name AS customer_bank_name',
-      ifsc_code: 'c.ifsc_code AS customer_ifsc_code',
-      mobile_no: 'c.mobile_no AS customer_mobile',
-      mail_id: 'c.mail_id AS customer_email',
-      tds_amount: 'c.tds_amount AS customer_tds_amount',
-      itr_passowrd: 'c.itr_password AS customer_itr_password',
-      income_type: 'c.income_type AS customer_income_type',
-      filling_type: 'c.filling_type AS customer_filling_type',
-      last_ay_income: 'c.last_ay_income AS customer_last_ay_income',
-      profile_photo: 'c.profile_photo AS customer_profile_photo',
-      attachments_1: 'c.attachments_1 AS customer_attachment_1',
-      attachments_2: 'c.attachments_2 AS customer_attachment_2',
-      attachments_3: 'c.attachments_3 AS customer_attachment_3',
-      attachments_4: 'c.attachments_4 AS customer_attachment_4',
-      attachments_5: 'c.attachments_5 AS customer_attachment_5',
-      comment_box: 'c.comment_box AS customer_comment_box',
+      father_name: 'ic.father_name AS customer_father_name',
+      dob: 'ic.dob AS customer_dob',
+      adhar_number: 'ic.adhar_number AS customer_adhar_number',
+      account_number: 'ic.account_number AS customer_account_number',
+      bank_name: 'ic.bank_name AS customer_bank_name',
+      ifsc_code: 'ic.ifsc_code AS customer_ifsc_code',
+      mail_id: 'ic.mail_id AS customer_email',
+      tds_amount: 'ic.tds_amount AS customer_tds_amount',
+      itr_passowrd: 'ic.itr_password AS customer_itr_password',
+      income_type: 'ic.income_type AS customer_income_type',
+      filling_type: 'ic.filling_type AS customer_filling_type',
+      last_ay_income: 'ic.last_ay_income AS customer_last_ay_income',
+      profile_photo: 'ic.profile_photo AS customer_profile_photo',
+      attachments_1: 'ic.attachments_1 AS customer_attachment_1',
+      attachments_2: 'ic.attachments_2 AS customer_attachment_2',
+      attachments_3: 'ic.attachments_3 AS customer_attachment_3',
+      attachments_4: 'ic.attachments_4 AS customer_attachment_4',
+      attachments_5: 'ic.attachments_5 AS customer_attachment_5',
+      comment_box: 'ic.comment_box AS customer_comment_box',
     };
 
-    for (const [permField, sqlField] of Object.entries(customerFieldMap)) {
-      if (permissions[permField] === 1) {
-        selectFields.push(sqlField);
+    if (permissions) {
+      for (const [permField, sqlField] of Object.entries(customerFieldMap)) {
+        if (permissions[permField] === 1) {
+          selectFields.push(sqlField);
+        }
       }
     }
 
@@ -93,8 +94,7 @@ router.get('/assigned-itrs/:caId', authenticateCA, async (req, res) => {
       SELECT ${selectClause}
       FROM ca_itr
       JOIN itr ON ca_itr.itr_id = itr.id
-      JOIN customer c ON itr.customer_id = c.id
-      JOIN agent a ON itr.agent_id = a.id
+      LEFT JOIN itr_customer ic ON itr.id = ic.itr_id
       WHERE ca_itr.ca_id = ?
     `;
 
@@ -164,7 +164,7 @@ router.get('/assigned/:itr_id', async (req, res) => {
 
 // Reject an ITR application
 router.post('/reject-itr', authenticateCA, async (req, res) => {
-  const { itr_id, reason } = req.body;
+  const { itr_id, reason, extra_charge } = req.body;
   const caId = req.caId;
 
   if (!itr_id || !reason) {
@@ -182,13 +182,19 @@ router.post('/reject-itr', authenticateCA, async (req, res) => {
       return res.status(403).json({ message: 'You are not assigned to this ITR' });
     }
 
-    // Update the ITR status to 'Rejected' and add the comment
+    // Update the ITR status to 'Rejected', add the comment and extra_charge
     await pool.query(
-      'UPDATE itr SET status = ?, comment = ? WHERE id = ?',
-      ['Rejected', reason, itr_id]
+      'UPDATE itr SET status = ?, Comment = ?, extra_charge = ? WHERE id = ?',
+      ['Rejected', reason, extra_charge || null, itr_id]
     );
 
     await pool.query('UPDATE ca_itr SET status = ? WHERE itr_id = ?', ['Rejected', itr_id]);
+
+    // 3. Log rejection in history
+    await pool.query(
+      'INSERT INTO itr_rejection_history (itr_id, rejected_by_type, rejected_by_id, reason, extra_charge) VALUES (?, "ca", ?, ?, ?)',
+      [itr_id, caId, reason, extra_charge || null]
+    );
 
     res.json({ message: 'ITR rejected successfully' });
   } catch (error) {
@@ -196,5 +202,23 @@ router.post('/reject-itr', authenticateCA, async (req, res) => {
     res.status(500).json({ message: 'Failed to reject ITR' });
   }
 });
+
+router.get('/rejected-itrs', authenticateCA, async (req, res) => {
+  const caId = req.caId;
+  try {
+    const [rows] = await pool.query(`
+      SELECT rh.*, ic.name, ic.pan_number, i.asst_year
+      FROM itr_rejection_history rh
+      JOIN itr i ON rh.itr_id = i.id
+      JOIN itr_customer ic ON i.id = ic.itr_id
+      WHERE rh.rejected_by_type = "ca" AND rh.rejected_by_id = ?
+      ORDER BY rh.created_at DESC
+    `, [caId]);
+    res.json({ data: rows });
+  } catch (error) {
+    console.error('Error fetching rejected ITRs:', error);
+    res.status(500).json({ message: 'Failed to fetch rejected ITRs' });
+  }
+})
 
 export default router;

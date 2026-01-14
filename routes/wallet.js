@@ -96,12 +96,13 @@ router.get('/agent/transactions', authenticateToken, async (req, res) => {
     const [transactions] = await pool.query(
       `SELECT wt.*, p.asst_year, p.customer_id,
               c.name as customer_name, c.pan_number as customer_pan, c.mobile_no as customer_mobile,
-              CASE WHEN wt.reference_type = 'itr_payment' 
-                   THEN CONCAT('ITR Payment (', p.asst_year, ')') 
-                   ELSE wt.description 
+              CASE 
+                WHEN wt.reference_type = 'itr_payment' THEN CONCAT('ITR Payment (', p.asst_year, ')') 
+                WHEN wt.reference_type = 'itr_extra_charge' THEN CONCAT('Extra Charge Reapply (', p.asst_year, ')')
+                ELSE wt.description 
               END as display_description
        FROM wallet_transactions wt
-       LEFT JOIN payment p ON wt.reference_id = p.id AND wt.reference_type = 'itr_payment'
+       LEFT JOIN payment p ON wt.reference_id = p.id AND (wt.reference_type = 'itr_payment' OR wt.reference_type = 'itr_extra_charge')
        LEFT JOIN customer c ON p.customer_id = c.id
        ${whereClause}
        ORDER BY wt.created_at DESC
@@ -113,7 +114,7 @@ router.get('/agent/transactions', authenticateToken, async (req, res) => {
     const [countRows] = await pool.query(
       `SELECT COUNT(*) as total 
        FROM wallet_transactions wt
-       LEFT JOIN payment p ON wt.reference_id = p.id AND wt.reference_type = 'itr_payment'
+       LEFT JOIN payment p ON wt.reference_id = p.id AND (wt.reference_type = 'itr_payment' OR wt.reference_type = 'itr_extra_charge')
        LEFT JOIN customer c ON p.customer_id = c.id
        ${whereClause}`,
       queryParams

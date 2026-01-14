@@ -27,7 +27,9 @@ const requireSuperadmin = (req, res, next) => {
 router.get('/', requireSuperadmin, async (req, res) => {
     try {
         const [rows] = await pool.query('SELECT * FROM ratecard ORDER BY created_at DESC');
-        res.json(rows);
+        // Ensure is_enabled is treated as boolean if it comes as 0/1 from DB
+        const ratecards = rows.map(r => ({ ...r, is_enabled: Boolean(r.is_enabled) }));
+        res.json(ratecards);
     } catch (error) {
         console.error('Error fetching ratecards:', error);
         res.status(500).json({ error: 'Failed to fetch ratecards' });
@@ -44,8 +46,8 @@ router.post('/', requireSuperadmin, async (req, res) => {
 
     try {
         const [result] = await pool.query(
-            'INSERT INTO ratecard (income_slab, assessment_year, calendar_from, calendar_to, penalty_amount) VALUES (?, ?, ?, ?, ?)',
-            [income_slab, assessment_year, calendar_from, calendar_to, penalty_amount]
+            'INSERT INTO ratecard (income_slab, assessment_year, calendar_from, calendar_to, penalty_amount, is_enabled) VALUES (?, ?, ?, ?, ?, ?)',
+            [income_slab, assessment_year, calendar_from, calendar_to, penalty_amount, true]
         );
         res.status(201).json({ message: 'Ratecard created successfully', id: result.insertId });
     } catch (error) {
@@ -61,8 +63,8 @@ router.put('/:id', requireSuperadmin, async (req, res) => {
 
     try {
         const [result] = await pool.query(
-            'UPDATE ratecard SET income_slab = ?, assessment_year = ?, calendar_from = ?, calendar_to = ?, penalty_amount = ? WHERE id = ?',
-            [income_slab, assessment_year, calendar_from, calendar_to, penalty_amount, id]
+            'UPDATE ratecard SET income_slab = ?, assessment_year = ?, calendar_from = ?, calendar_to = ?, penalty_amount = ?, is_enabled = COALESCE(?, is_enabled) WHERE id = ?',
+            [income_slab, assessment_year, calendar_from, calendar_to, penalty_amount, req.body.is_enabled, id]
         );
 
         if (result.affectedRows === 0) {
@@ -94,6 +96,28 @@ router.delete('/:id', requireSuperadmin, async (req, res) => {
     }
 });
 
+// Toggle ratecard status
+router.patch('/:id/toggle', requireSuperadmin, async (req, res) => {
+    const { id } = req.params;
+    const { is_enabled } = req.body;
+
+    try {
+        const [result] = await pool.query(
+            'UPDATE ratecard SET is_enabled = ? WHERE id = ?',
+            [is_enabled, id]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Ratecard not found' });
+        }
+
+        res.json({ message: 'Ratecard status updated successfully' });
+    } catch (error) {
+        console.error('Error updating ratecard status:', error);
+        res.status(500).json({ error: 'Failed to update ratecard status' });
+    }
+});
+
 // Check penalty for given slab and AY
 router.post('/check-penalty', async (req, res) => {
     const { income_slab, assessment_year } = req.body;
@@ -108,6 +132,7 @@ router.post('/check-penalty', async (req, res) => {
             FROM ratecard 
             WHERE income_slab = ? 
             AND assessment_year = ? 
+            AND is_enabled = TRUE
             AND CURDATE() BETWEEN calendar_from AND calendar_to
             LIMIT 1
         `;

@@ -39,7 +39,7 @@ router.get('/list', authenticateToken, async (req, res) => {
             FROM itr
             JOIN customer ON itr.customer_id = customer.id
             JOIN agent ON itr.agent_id = agent.id
-            WHERE (itr.status = 'E-verification' OR itr.status = 'Completed')
+            WHERE (itr.status = 'E-verification' OR itr.status = 'Completed' OR itr.status = 'Filled')
             AND itr.subadmin_send = 1
             ORDER BY itr.updated_at DESC
         `);
@@ -78,6 +78,12 @@ router.put('/otp-check/:itrId', authenticateToken, upload.single('document'), as
 
         updateQuery += ' WHERE id=?';
         params.push(itrId);
+
+        // Update itr_flow with OTP/Completion date
+        await pool.query(
+            'UPDATE itr_flow SET everification_date = CURRENT_TIMESTAMP, completed_date = CURRENT_TIMESTAMP WHERE itr_id = ? AND completed_date IS NULL',
+            [itrId]
+        );
 
         const [result] = await pool.query(updateQuery, params);
         if (result.affectedRows === 0) {

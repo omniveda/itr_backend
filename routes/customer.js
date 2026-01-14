@@ -414,6 +414,12 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
 
       const itrId = itrResult.insertId;
 
+      // Initialize flow tracking
+      await pool.query(
+        'INSERT INTO itr_flow (itr_id, customer_id, itr_date) VALUES (?, ?, CURRENT_TIMESTAMP)',
+        [itrId, customerId]
+      );
+
       // Snapshot values, overriding with formData if available
       const incomeSlab = formData?.income_slab || customer.income_slab;
       const fileCharge = formData?.file_charge || customer.file_charge;
@@ -564,5 +570,49 @@ router.put('/snapshot/:itrId', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Failed to update snapshot' });
   }
 });
+
+// GET detailed flow and rejection history for a specific ITR
+// router.get('/itr-flow/:itrId', authenticateToken, async (req, res) => {
+//   const { itrId } = req.params;
+//   try {
+//     // 1. Fetch the main flow milestones
+//     const [flowRows] = await pool.query(`
+//       SELECT f.*, 
+//              c.name as customer_name,
+//              s.username as subadmin_username,
+//              ca.name as ca_name
+//       FROM itr_flow f
+//       JOIN customer c ON f.customer_id = c.id
+//       LEFT JOIN subadmin s ON f.subadmin_id = s.id
+//       LEFT JOIN ca ca ON f.ca_id = ca.id
+//       WHERE f.itr_id = ?
+//     `, [itrId]);
+
+//     if (flowRows.length === 0) {
+//       return res.status(404).json({ error: 'Flow data not found for this ITR' });
+//     }
+
+//     // 2. Fetch the rejection history
+//     const [rejectionRows] = await pool.query(`
+//       SELECT rh.*,
+//              CASE 
+//                WHEN rh.rejected_by_type = 'subadmin' THEN (SELECT username FROM subadmin WHERE id = rh.rejected_by_id)
+//                WHEN rh.rejected_by_type = 'ca' THEN (SELECT name FROM ca WHERE id = rh.rejected_by_id)
+//                WHEN rh.rejected_by_type = 'superadmin' THEN 'Superadmin'
+//              END as rejected_by_name
+//       FROM itr_rejection_history rh
+//       WHERE rh.itr_id = ?
+//       ORDER BY rh.created_at ASC
+//     `, [itrId]);
+
+//     res.json({
+//       flow: flowRows[0],
+//       rejections: rejectionRows
+//     });
+//   } catch (error) {
+//     console.error('Error fetching ITR flow history:', error);
+//     res.status(500).json({ error: 'Failed to fetch ITR flow history' });
+//   }
+// });
 
 export default router;

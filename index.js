@@ -69,7 +69,7 @@ app.use('/chat', chatRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/subadmin-everification', subadminEverificationRoutes);
 app.use('/ratecard', ratecardRoutes);
-// app.use('/agent', agentRoutes);
+app.use('/agent', agentRoutes);
 
 // Serve static files from backend/uploads directory
 app.use('/backend/uploads', express.static(path.join(process.cwd(), 'backend', 'uploads')));

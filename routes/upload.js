@@ -93,6 +93,12 @@ router.post('/ca-assessment', upload.array('files', 3), async (req, res) => {
     // Update the ca_itr table status
     await pool.query('UPDATE ca_itr SET status = ? WHERE itr_id = ?', ['E-verification', itr_id]);
 
+    // Update itr_flow with CA filled date
+    await pool.query(
+      'UPDATE itr_flow SET ca_filled_date = CURRENT_TIMESTAMP WHERE itr_id = ? AND ca_filled_date IS NULL',
+      [itr_id]
+    );
+
     res.json({ message: 'Assessments uploaded successfully', urls: fileUrls });
   } catch (error) {
     console.error('File upload error:', error);

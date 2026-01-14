@@ -276,6 +276,26 @@ router.put('/cas/:id/reject-permission', requireSuperadmin, async (req, res) => 
   }
 });
 
+// Toggle ca history permission
+router.put('/cas/:id/history-permission', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Get current status
+    const [rows] = await pool.query('SELECT history FROM ca WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'CA not found' });
+    }
+    const currentStatus = rows[0].history;
+    const newStatus = !currentStatus; // Toggle boolean
+
+    await pool.query('UPDATE ca SET history = ? WHERE id = ?', [newStatus, id]);
+    res.json({ message: `CA history permission ${newStatus ? 'enabled' : 'disabled'} successfully`, history: newStatus });
+  } catch (error) {
+    console.error('Error toggling CA history permission:', error);
+    res.status(500).json({ error: 'Failed to toggle history permission' });
+  }
+});
+
 // Delete a subadmin
 router.delete('/subadmins/:id', requireSuperadmin, async (req, res) => {
   const { id } = req.params;
@@ -380,6 +400,53 @@ router.get('/subadmins/:id/password', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Get subadmin ITR flow permissions
+router.get('/subadmins/:id/itr-permissions', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT * FROM subadmin_itr_permissions WHERE subadmin_id = ?', [id]);
+    if (rows.length === 0) {
+      // Create default permissions if not exists
+      const [subadmin] = await pool.query('SELECT username FROM subadmin WHERE id = ?', [id]);
+      if (subadmin.length === 0) return res.status(404).json({ error: 'Subadmin not found' });
+
+      await pool.query(
+        'INSERT INTO subadmin_itr_permissions (subadmin_id, subadmin_name) VALUES (?, ?)',
+        [id, subadmin[0].username]
+      );
+      const [newRows] = await pool.query('SELECT * FROM subadmin_itr_permissions WHERE subadmin_id = ?', [id]);
+      return res.json(newRows[0]);
+    }
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error fetching subadmin ITR permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch permissions' });
+  }
+});
+
+// Toggle a specific subadmin ITR flow permission
+router.post('/subadmins/:id/itr-permissions/toggle', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { field } = req.body;
+  const allowedFields = ['pending', 'in_progress', 'e_verification', 'completed', 'rejected', 'flow', 'ca_change', 'recharge_not', 'itr_history'];
+
+  if (!allowedFields.includes(field)) {
+    return res.status(400).json({ error: 'Invalid permission field' });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE subadmin_itr_permissions SET ${field} = NOT ${field} WHERE subadmin_id = ?`,
+      [id]
+    );
+    const [rows] = await pool.query('SELECT * FROM subadmin_itr_permissions WHERE subadmin_id = ?', [id]);
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error toggling subadmin ITR permission:', error);
+    res.status(500).json({ error: 'Failed to toggle permission' });
+  }
+});
+
 // Duplicate a subadmin with same permissions
 router.post('/subadmins/:id/duplicate', requireSuperadmin, async (req, res) => {
   const { id } = req.params;
@@ -443,11 +510,11 @@ router.put('/subadmins/:id/status', requireSuperadmin, async (req, res) => {
 router.get('/cas', requireSuperadmin, async (req, res) => {
   try {
     const [cas] = await pool.query(`
-      SELECT c.id, c.name, c.username, c.email, c.isca, c.reject,
+      SELECT c.id, c.name, c.username, c.email, c.isca, c.reject, c.history,
              GROUP_CONCAT(cp.permission SEPARATOR ',') as permissions
       FROM ca c
       LEFT JOIN ca_permissions cp ON c.id = cp.ca_id
-      GROUP BY c.id, c.name, c.username, c.email, c.isca, c.reject
+      GROUP BY c.id, c.name, c.username, c.email, c.isca, c.reject, c.history
     `);
     // Parse permissions string into array
     const result = cas.map(ca => ({
@@ -644,7 +711,15 @@ router.get('/customers', requireSuperadmin, async (req, res) => {
 // Get all payments
 router.get('/payments', requireSuperadmin, async (req, res) => {
   try {
-    const [payments] = await pool.query('SELECT id, amount, paid, payment_method, created_at FROM payment');
+    const [payments] = await pool.query(`
+      SELECT p.*, 
+             c.name as customer_name, c.pan_number as customer_pan, c.mobile_no as customer_mobile,
+             a.name as agent_name
+      FROM payment p
+      JOIN customer c ON p.customer_id = c.id
+      JOIN agent a ON p.agent_id = a.id
+      ORDER BY p.created_at DESC
+    `);
     res.json(payments);
   } catch (error) {
     console.error('Error fetching payments:', error);
@@ -730,7 +805,7 @@ router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
 router.get('/itrs', requireSuperadmin, async (req, res) => {
   try {
     const [itrs] = await pool.query(`
-      SELECT itr.id, customer.name as customer_name,customer.father_name,customer.pan_number,customer.dob,customer.adhar_number,customer.mobile_no,customer.account_number,customer.bank_name,customer.ifsc_code,customer.mail_id,customer.tds_amount,customer.itr_password,customer.income_type,customer.filling_type,customer.last_ay_income,customer.profile_photo,customer.attachments_1,customer.attachments_2,customer.attachments_3,customer.attachments_4,customer.attachments_5,customer.income_slab,customer.comment_box,customer.customer_type, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check, itr.Superadmin_doc1
+      SELECT itr.id, customer.name as customer_name,customer.father_name,customer.pan_number,customer.dob,customer.adhar_number,customer.mobile_no,customer.account_number,customer.bank_name,customer.ifsc_code,customer.mail_id,customer.tds_amount,customer.itr_password,customer.income_type,customer.filling_type,customer.last_ay_income,customer.profile_photo,customer.attachments_1,customer.attachments_2,customer.attachments_3,customer.attachments_4,customer.attachments_5,customer.income_slab,customer.comment_box,customer.customer_type, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check, itr.Superadmin_doc1, itr.Comment, itr.extra_charge
       FROM itr
       LEFT JOIN customer ON itr.customer_id = customer.id
     `);
@@ -814,10 +889,43 @@ router.put('/otp-check/:itrId', requireSuperadmin, upload.single('document'), as
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'ITR not found' });
     }
+
+    // Update itr_flow with OTP/Completion date
+    await pool.query(
+      'UPDATE itr_flow SET everification_date = CURRENT_TIMESTAMP, completed_date = CURRENT_TIMESTAMP WHERE itr_id = ? AND completed_date IS NULL',
+      [itrId]
+    );
+
     res.json({ message: 'OTP check updated successfully' });
   } catch (error) {
     console.error('Error updating OTP check status:', error);
     return res.status(500).json({ error: 'Failed to update OTP check status' });
+  }
+});
+
+// Undo rejection for an ITR
+router.post('/undo-reject-itr/:itrId', requireSuperadmin, async (req, res) => {
+  const { itrId } = req.params;
+  try {
+    // Check if the ITR is actually rejected
+    const [itrRows] = await pool.query('SELECT status FROM itr WHERE id = ?', [itrId]);
+    if (itrRows.length === 0) {
+      return res.status(404).json({ error: 'ITR not found' });
+    }
+    if (itrRows[0].status !== 'Rejected') {
+      return res.status(400).json({ error: 'Only rejected ITRs can be reverted' });
+    }
+
+    // Update status to Pending and clear comments/charges
+    await pool.query(
+      'UPDATE itr SET status = "Pending", Comment = NULL, extra_charge = NULL WHERE id = ?',
+      [itrId]
+    );
+
+    res.json({ message: 'ITR rejection cancelled successfully and status reset to Pending.' });
+  } catch (error) {
+    console.error('Error undoing ITR rejection:', error);
+    res.status(500).json({ error: 'Failed to cancel ITR rejection' });
   }
 });
 
@@ -913,6 +1021,12 @@ router.put('/assign-ca/:itrId', requireSuperadmin, async (req, res) => {
       VALUES (?, ?, 'Filled')
       ON DUPLICATE KEY UPDATE ca_id = VALUES(ca_id), status = 'Filled'
     `, [itrId, caId]);
+
+    // 4. Update itr_flow with CA assignment info
+    await pool.query(
+      'UPDATE itr_flow SET ca_id = ?, ca_assign_date = CURRENT_TIMESTAMP WHERE itr_id = ? AND ca_assign_date IS NULL',
+      [caId, itrId]
+    );
 
     res.json({ message: 'CA assigned/updated successfully', caName: caRows[0].name });
   } catch (error) {
@@ -1140,6 +1254,50 @@ router.get('/flow', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Get detailed flow and rejection history for a specific ITR
+router.get('/itr-flow/:itrId', requireSuperadmin, async (req, res) => {
+  const { itrId } = req.params;
+  try {
+    // 1. Fetch the main flow milestones
+    const [flowRows] = await pool.query(`
+      SELECT f.*, 
+             c.name as customer_name,
+             s.username as subadmin_username,
+             ca.name as ca_name
+      FROM itr_flow f
+      JOIN customer c ON f.customer_id = c.id
+      LEFT JOIN subadmin s ON f.subadmin_id = s.id
+      LEFT JOIN ca ca ON f.ca_id = ca.id
+      WHERE f.itr_id = ?
+    `, [itrId]);
+
+    if (flowRows.length === 0) {
+      return res.status(404).json({ error: 'Flow data not found for this ITR' });
+    }
+
+    // 2. Fetch the rejection history
+    const [rejectionRows] = await pool.query(`
+      SELECT rh.*,
+             CASE 
+               WHEN rh.rejected_by_type = 'subadmin' THEN (SELECT username FROM subadmin WHERE id = rh.rejected_by_id)
+               WHEN rh.rejected_by_type = 'ca' THEN (SELECT name FROM ca WHERE id = rh.rejected_by_id)
+               WHEN rh.rejected_by_type = 'superadmin' THEN 'Superadmin'
+             END as rejected_by_name
+      FROM itr_rejection_history rh
+      WHERE rh.itr_id = ?
+      ORDER BY rh.created_at ASC
+    `, [itrId]);
+
+    res.json({
+      flow: flowRows[0],
+      rejections: rejectionRows
+    });
+  } catch (error) {
+    console.error('Error fetching ITR flow history:', error);
+    res.status(500).json({ error: 'Failed to fetch ITR flow history' });
+  }
+});
+
 // Delete a specific document reference
 router.delete('/itr/:itrId/document/:fieldName', requireSuperadmin, async (req, res) => {
   const { itrId, fieldName } = req.params;
@@ -1210,6 +1368,38 @@ router.put('/itr/:itrId/document/:fieldName', requireSuperadmin, upload.single('
   } catch (error) {
     console.error('Error uploading document:', error);
     res.status(500).json({ error: 'Failed to upload document' });
+  }
+});
+
+// Reject ITR
+router.post('/reject-itr', requireSuperadmin, async (req, res) => {
+  const { itr_id, reason, extra_charge } = req.body;
+
+  if (!itr_id || !reason) {
+    return res.status(400).json({ error: 'itr_id and reason are required' });
+  }
+
+  try {
+    // 1. Update ITR table
+    await pool.query(
+      'UPDATE itr SET status = "Rejected", Comment = ?, extra_charge = ?, superadmin_send = FALSE WHERE id = ?',
+      [reason, extra_charge || null, itr_id]
+    );
+
+    // 2. Update ca_itr and subadmin_itr status
+    await pool.query('UPDATE ca_itr SET status = "Rejected" WHERE itr_id = ?', [itr_id]);
+    await pool.query('UPDATE subadmin_itr SET status = "Rejected" WHERE itr_id = ?', [itr_id]);
+
+    // 3. Log rejection in history
+    await pool.query(
+      'INSERT INTO itr_rejection_history (itr_id, rejected_by_type, rejected_by_id, reason, extra_charge) VALUES (?, "superadmin", 0, ?, ?)',
+      [itr_id, reason, extra_charge || null]
+    );
+
+    res.json({ message: 'ITR rejected successfully' });
+  } catch (error) {
+    console.error('Error rejecting ITR:', error);
+    res.status(500).json({ error: 'Failed to reject ITR' });
   }
 });
 

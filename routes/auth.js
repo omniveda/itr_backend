@@ -183,7 +183,7 @@ router.get('/me', async (req, res) => {
       }
       res.json({ superadmin: { ...rows[0], issuperadmin: true } });
     } else if (decoded.isCA) {
-      const [rows] = await pool.query('SELECT id, username, name, email, isca, reject FROM ca WHERE id = ?', [decoded.id]);
+      const [rows] = await pool.query('SELECT id, username, name, email, isca, reject, history FROM ca WHERE id = ?', [decoded.id]);
       if (rows.length === 0) {
         return res.status(404).json({ message: 'CA not found' });
       }
