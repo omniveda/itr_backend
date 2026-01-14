@@ -877,7 +877,7 @@ router.put('/otp-check/:itrId', requireSuperadmin, upload.single('document'), as
       // Write file to local system
       fs.writeFileSync(filePath, req.file.buffer);
 
-      const fileUrl = `http://localhost:3000/uploads/${fileName}`;
+      const fileUrl = `http://85.217.170.83/uploads/${fileName}`;
       updateQuery += ', Superadmin_doc1=?';
       params.push(fileUrl);
     }
