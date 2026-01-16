@@ -7,6 +7,13 @@ import { pool } from '../db.js';
 
 const router = express.Router();
 
+// Helper to sanitize decimal values
+const sanitizeDecimal = (val) => {
+  if (val === '' || val === undefined || val === null) return null;
+  const num = parseFloat(val);
+  return isNaN(num) ? null : num;
+};
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -90,8 +97,8 @@ router.post('/', authenticateToken, upload.fields([
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name, father_name, dob, pan_number, adhar_number, account_number, bank_name, ifsc_code,
-        tds_amount, itr_password, income_type, mobile_no, mail_id, filling_type,
-        last_ay_income, profile_photo, user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
+        sanitizeDecimal(tds_amount), itr_password, income_type, mobile_no, mail_id, filling_type,
+        sanitizeDecimal(last_ay_income), profile_photo, user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
         attachments.attachments_4, attachments.attachments_5, attachments.attachments_6, income_slab, comment_box, customer_type, req.agentId
       ]
     );
@@ -187,8 +194,8 @@ router.post('/with-payment', authenticateToken, upload.fields([
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customerData.name, customerData.father_name, customerData.dob, customerData.pan_number, customerData.adhar_number, customerData.account_number, customerData.bank_name, customerData.ifsc_code,
-        customerData.tds_amount, customerData.itr_password, customerData.income_type, customerData.mobile_no, customerData.mail_id, customerData.filling_type,
-        customerData.last_ay_income, customerData.profile_photo, customerData.user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
+        sanitizeDecimal(customerData.tds_amount), customerData.itr_password, customerData.income_type, customerData.mobile_no, customerData.mail_id, customerData.filling_type,
+        sanitizeDecimal(customerData.last_ay_income), customerData.profile_photo, customerData.user_id, hashedPassword, attachments.attachments_1, attachments.attachments_2, attachments.attachments_3,
         attachments.attachments_4, attachments.attachments_5, customerData.income_slab, customerData.comment_box, customerData.customer_type, req.agentId
       ]
     );
@@ -281,6 +288,10 @@ router.put('/:id', authenticateToken, upload.fields([
 
   // Merge file paths into updates
   Object.assign(updates, attachments);
+
+  // Sanitize numeric fields
+  if (updates.hasOwnProperty('tds_amount')) updates.tds_amount = sanitizeDecimal(updates.tds_amount);
+  if (updates.hasOwnProperty('last_ay_income')) updates.last_ay_income = sanitizeDecimal(updates.last_ay_income);
 
   // Remove 'paid' field as it's not part of the customer table
   delete updates.paid;
@@ -434,8 +445,8 @@ router.post('/send-to-subadmin', authenticateToken, async (req, res) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           itrId, customer.name, customer.father_name, customer.dob, customer.pan_number, customer.adhar_number, customer.account_number, customer.bank_name, customer.ifsc_code,
-          customer.tds_amount, customer.itr_password, customer.asst_year_3yr, customer.income_type, customer.mobile_no, customer.mail_id, customer.filling_type,
-          customer.last_ay_income, customer.profile_photo, customer.user_id, customer.password, customer.attachments_1, customer.attachments_2, customer.attachments_3,
+          sanitizeDecimal(customer.tds_amount), customer.itr_password, customer.asst_year_3yr, customer.income_type, customer.mobile_no, customer.mail_id, customer.filling_type,
+          sanitizeDecimal(customer.last_ay_income), customer.profile_photo, customer.user_id, customer.password, customer.attachments_1, customer.attachments_2, customer.attachments_3,
           customer.attachments_4, customer.attachments_5, customer.attachments_6, fileCharge, incomeSlab, customer.comment_box, customer.customer_type, customer.agent_id
         ]
       );
@@ -544,7 +555,12 @@ router.put('/snapshot/:itrId', authenticateToken, async (req, res) => {
     // Filter out restricted fields from snapshot updates
     const restrictedFields = ['id', 'itr_id', 'agent_id', 'snapshot_date', 'created_at'];
     const filteredFields = fields.filter(f => !restrictedFields.includes(f));
-    const filteredValues = filteredFields.map(f => updates[f]);
+    const filteredValues = filteredFields.map(f => {
+      if (f === 'tds_amount' || f === 'last_ay_income') {
+        return sanitizeDecimal(updates[f]);
+      }
+      return updates[f];
+    });
 
     const setClause = filteredFields.map(field => `${field} = ?`).join(', ');
 
