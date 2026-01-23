@@ -1465,6 +1465,8 @@ router.put('/itrs/:id', requireSuperadmin, async (req, res) => {
       }
     }
 
+    const [userData] = await pool.query('Select * from itr_customer where itr_id = ?', [id]);
+
     // 1. Update itr_customer table (Personal, Financial, and Password Details)
     await pool.query(
       `UPDATE itr_customer SET 
@@ -1473,7 +1475,7 @@ router.put('/itrs/:id', requireSuperadmin, async (req, res) => {
         ifsc_code = ?, itr_password = ?, income_slab = ?, comment_box = ?
        WHERE itr_id = ?`,
       [
-        name, father_name, formattedDob, mobile_no, mail_id,
+        userData[0].name, father_name, formattedDob, mobile_no, mail_id,
         pan_number, adhar_number, account_number, bank_name,
         ifsc_code, itr_password, income_slab, comment_box,
         id
