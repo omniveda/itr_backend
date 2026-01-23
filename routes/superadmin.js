@@ -1406,17 +1406,60 @@ router.post('/reject-itr', requireSuperadmin, async (req, res) => {
 // Update ITR details
 router.put('/itrs/:id', requireSuperadmin, async (req, res) => {
   const { id } = req.params;
-  const { name, father_name, dob, mobile_no, mail_id, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_details, itr_password, asst_year, mobile_no_adhar_registered, income_slab, comment_box } = req.body;
+  const {
+    name, father_name, dob, mobile_no, mail_id, pan_number, adhar_number,
+    account_number, bank_name, ifsc_code, itr_password,
+    asst_year, income_slab, comment_box
+  } = req.body;
 
   try {
-    // 1. Update ITR table
+    // Format DOB to YYYY-MM-DD for MySQL
+    let formattedDob = dob;
+    if (dob) {
+      const date = new Date(dob);
+      if (!isNaN(date.getTime())) {
+        formattedDob = date.toISOString().split('T')[0];
+      }
+    }
+
+    // 1. Update itr_customer table (Personal, Financial, and Password Details)
     await pool.query(
-      'UPDATE itr SET name = ?, father_name = ?, dob = ?, mobile_no = ?, mail_id = ?, pan_number = ?, adhar_number = ?, account_number = ?, bank_name = ?, ifsc_code = ?, tds_details = ?, itr_password = ?, asst_year = ?, mobile_no_adhar_registered = ?, income_slab = ?, comment_box = ?, updated_at = NOW() WHERE id = ?',
-      [name, father_name, dob, mobile_no, mail_id, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_details, itr_password, asst_year, mobile_no_adhar_registered, income_slab, comment_box, id]
+      `UPDATE itr_customer SET 
+        name = ?, father_name = ?, dob = ?, mobile_no = ?, mail_id = ?, 
+        pan_number = ?, adhar_number = ?, account_number = ?, bank_name = ?, 
+        ifsc_code = ?, itr_password = ?, income_slab = ?, comment_box = ?
+       WHERE itr_id = ?`,
+      [
+        name, father_name, formattedDob, mobile_no, mail_id,
+        pan_number, adhar_number, account_number, bank_name,
+        ifsc_code, itr_password, income_slab, comment_box,
+        id
+      ]
     );
 
-    // 2. Fetch updated ITR to return
-    const [updatedITR] = await pool.query('SELECT * FROM itr WHERE id = ?', [id]);
+    // 2. Update itr table (System Status & Year)
+    await pool.query(
+      `UPDATE itr SET 
+        asst_year = ?, 
+        updated_at = NOW() 
+       WHERE id = ?`,
+      [
+        asst_year,
+        id
+      ]
+    );
+
+    // 3. Fetch updated ITR data (joining details)
+    const [updatedITR] = await pool.query(`
+      SELECT 
+        i.*, 
+        ic.name, ic.father_name, ic.dob, ic.mobile_no, ic.mail_id, 
+        ic.pan_number, ic.adhar_number, ic.account_number, ic.bank_name, ic.ifsc_code,
+        ic.itr_password, ic.income_slab, ic.comment_box
+      FROM itr i
+      LEFT JOIN itr_customer ic ON i.id = ic.itr_id
+      WHERE i.id = ?
+    `, [id]);
 
     if (updatedITR.length === 0) {
       return res.status(404).json({ error: 'ITR not found' });
@@ -1425,7 +1468,7 @@ router.put('/itrs/:id', requireSuperadmin, async (req, res) => {
     res.json(updatedITR[0]);
   } catch (error) {
     console.error('Error updating ITR:', error);
-    res.status(500).json({ error: 'Failed to update ITR' });
+    res.status(500).json({ error: 'Failed to update ITR', details: error.message });
   }
 });
 
