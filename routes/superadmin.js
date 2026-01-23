@@ -805,9 +805,52 @@ router.put('/customer-form-fields/:id', requireSuperadmin, async (req, res) => {
 router.get('/itrs', requireSuperadmin, async (req, res) => {
   try {
     const [itrs] = await pool.query(`
-      SELECT itr.id, customer.name as customer_name,customer.father_name,customer.pan_number,customer.dob,customer.adhar_number,customer.mobile_no,customer.account_number,customer.bank_name,customer.ifsc_code,customer.mail_id,customer.tds_amount,customer.itr_password,customer.income_type,customer.filling_type,customer.last_ay_income,customer.profile_photo,customer.attachments_1,customer.attachments_2,customer.attachments_3,customer.attachments_4,customer.attachments_5,customer.income_slab,customer.comment_box,customer.customer_type, itr.status, itr.agent_id, itr.created_at, itr.asst_year, itr.status, itr.Ca_doc1, itr.Ca_doc2, itr.Ca_doc3, itr.subadmin_send, itr.ca_send, itr.ca_id, itr.superadmin_send, itr.Subadmin_doc1, itr.Subadmin_doc2, itr.otp_check, itr.Superadmin_doc1, itr.Comment, itr.extra_charge
+      SELECT 
+        itr.id, 
+        ic.name as customer_name,
+        ic.father_name,
+        ic.pan_number,
+        ic.dob,
+        ic.adhar_number,
+        ic.mobile_no,
+        ic.account_number,
+        ic.bank_name,
+        ic.ifsc_code,
+        ic.mail_id,
+        ic.tds_amount,
+        ic.itr_password,
+        ic.income_type,
+        ic.filling_type,
+        ic.last_ay_income,
+        ic.profile_photo,
+        ic.attachments_1,
+        ic.attachments_2,
+        ic.attachments_3,
+        ic.attachments_4,
+        ic.attachments_5,
+        ic.income_slab,
+        ic.comment_box,
+        ic.customer_type, 
+        itr.status, 
+        itr.agent_id, 
+        itr.created_at, 
+        itr.asst_year, 
+        itr.Ca_doc1, 
+        itr.Ca_doc2, 
+        itr.Ca_doc3, 
+        itr.subadmin_send, 
+        itr.ca_send, 
+        itr.ca_id, 
+        itr.superadmin_send, 
+        itr.Subadmin_doc1, 
+        itr.Subadmin_doc2, 
+        itr.otp_check, 
+        itr.Superadmin_doc1, 
+        itr.Comment, 
+        itr.extra_charge
       FROM itr
-      LEFT JOIN customer ON itr.customer_id = customer.id
+      LEFT JOIN itr_customer ic ON itr.id = ic.itr_id
+      ORDER BY itr.id DESC
     `);
     res.json(itrs);
   } catch (error) {
