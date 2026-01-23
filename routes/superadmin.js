@@ -1403,4 +1403,30 @@ router.post('/reject-itr', requireSuperadmin, async (req, res) => {
   }
 });
 
+// Update ITR details
+router.put('/itrs/:id', requireSuperadmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, father_name, dob, mobile_no, mail_id, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_details, itr_password, asst_year, mobile_no_adhar_registered, income_slab, comment_box } = req.body;
+
+  try {
+    // 1. Update ITR table
+    await pool.query(
+      'UPDATE itr SET name = ?, father_name = ?, dob = ?, mobile_no = ?, mail_id = ?, pan_number = ?, adhar_number = ?, account_number = ?, bank_name = ?, ifsc_code = ?, tds_details = ?, itr_password = ?, asst_year = ?, mobile_no_adhar_registered = ?, income_slab = ?, comment_box = ?, updated_at = NOW() WHERE id = ?',
+      [name, father_name, dob, mobile_no, mail_id, pan_number, adhar_number, account_number, bank_name, ifsc_code, tds_details, itr_password, asst_year, mobile_no_adhar_registered, income_slab, comment_box, id]
+    );
+
+    // 2. Fetch updated ITR to return
+    const [updatedITR] = await pool.query('SELECT * FROM itr WHERE id = ?', [id]);
+
+    if (updatedITR.length === 0) {
+      return res.status(404).json({ error: 'ITR not found' });
+    }
+
+    res.json(updatedITR[0]);
+  } catch (error) {
+    console.error('Error updating ITR:', error);
+    res.status(500).json({ error: 'Failed to update ITR' });
+  }
+});
+
 export default router;
