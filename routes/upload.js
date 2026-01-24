@@ -69,7 +69,7 @@ router.post('/ca-assessment', upload.array('files', 3), async (req, res) => {
       fs.writeFileSync(filePath, file.buffer);
 
       // Create URL for accessing the file
-      const fileUrl = `http://85.217.170.83/backend/uploads/${fileName}`;
+      const fileUrl = `http://85.217.170.83/api/backend/uploads/${fileName}`;
       fileUrls.push(fileUrl);
     }
 
