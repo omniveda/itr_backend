@@ -1,0 +1,1 @@
+customer_type,tds_amount,agent_id,attachments_6,attachments_5,attachments_4,attachments_3,attachments_2,attachments_1,user_id,profile_photo,last_ay_income,income_type,filling_type,mail_id,itr_password,password ,name,father_name,mobile_no,adhar_number ,pan_number,dob,apply_date,updated_date,income_slab,account_number,ifsc_code,bank_name,comment_box,,
