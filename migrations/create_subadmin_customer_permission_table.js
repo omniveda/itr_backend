@@ -14,7 +14,7 @@ async function createSubadminCustomerPermissionTable() {
   const connection = await mysql.createConnection(config);
   try {
     const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS Subadmin_customer_permission (
+      CREATE TABLE IF NOT EXISTS subadmin_customer_permission (
         id INT AUTO_INCREMENT PRIMARY KEY,
         subadmin_permissions_id INT NOT NULL,
         name TINYINT(1) DEFAULT 0,
