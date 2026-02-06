@@ -6,6 +6,17 @@ import { pool } from '../db.js';
 
 const router = express.Router();
 
+router.get('/check-mobile/:mobile', async (req, res) => {
+  const { mobile } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT id FROM agent WHERE mobile_no = ?', [mobile]);
+    res.json({ exists: rows.length > 0 });
+  } catch (error) {
+    console.error('Error checking mobile existence:', error);
+    res.status(500).json({ message: 'Error checking mobile number' });
+  }
+});
+
 router.post('/register', async (req, res) => {
   const { subadmin, ca, username, ...data } = req.body;
 

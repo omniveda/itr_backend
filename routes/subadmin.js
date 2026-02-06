@@ -411,7 +411,7 @@ router.post('/upload-subadmin-doc/:itrId', authenticateToken, upload.single('fil
     fs.writeFileSync(filePath, req.file.buffer);
 
     // Create URL for accessing the file
-    const fileUrl = `http://85.217.170.83/api/uploads/${fileName}`;
+    const fileUrl = `https://itrjainbandhutrust.com/api/uploads/${fileName}`;
 
     // Update the itr table with the document URL
     await pool.query(`UPDATE itr SET ${docType} = ? WHERE id = ?`, [fileUrl, itrId]);

@@ -28,7 +28,7 @@ const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 const io = new IOServer(server, {
   cors: {
-    origin: ['http://localhost:3001', 'http://85.217.170.83'],
+    origin: ['http://localhost:3001', 'https://itrjainbandhutrust.com'],
     credentials: true,
   },
 });
@@ -37,7 +37,7 @@ const io = new IOServer(server, {
 app.set('io', io);
 
 app.use(cors({
-  origin: ['http://localhost:3001', 'http://85.217.170.83'],
+  origin: ['http://localhost:3001', 'https://itrjainbandhutrust.com'],
   credentials: true,
 }));
 app.use(express.json());

@@ -71,7 +71,7 @@ router.put('/otp-check/:itrId', authenticateToken, upload.single('document'), as
             // Write file to local system
             fs.writeFileSync(filePath, req.file.buffer);
 
-            const fileUrl = `http://85.217.170.83/uploads/${fileName}`;
+            const fileUrl = `https://itrjainbandhutrust.com/uploads/${fileName}`;
             updateQuery += ', Superadmin_doc1=?';
             params.push(fileUrl);
         }
