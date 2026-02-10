@@ -50,7 +50,7 @@ const requireSuperadmin = (req, res, next) => {
 router.get('/agents', requireSuperadmin, async (req, res) => {
   try {
     const [agents] = await pool.query(`
-      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.file_charge, a.wbalance, a.isdownload,
+      SELECT a.id, a.name, a.father_name, a.mobile_no, a.mail_id, a.address, a.profile_photo, a.alternate_mobile_no, a.isagent, a.file_charge, a.wbalance, a.isdownload, a.register_date,
              ap.permissions
       FROM agent a
       LEFT JOIN agent_permissions ap ON a.id = ap.agent_id

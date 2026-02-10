@@ -17,6 +17,17 @@ router.get('/check-mobile/:mobile', async (req, res) => {
   }
 });
 
+router.get('/check-email/:email', async (req, res) => {
+  const { email } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT id FROM agent WHERE mail_id = ?', [email]);
+    res.json({ exists: rows.length > 0 });
+  } catch (error) {
+    console.error('Error checking email existence:', error);
+    res.status(500).json({ message: 'Error checking email' });
+  }
+});
+
 router.post('/register', async (req, res) => {
   const { subadmin, ca, username, ...data } = req.body;
 
@@ -48,9 +59,10 @@ router.post('/register', async (req, res) => {
       if (typeof profile_photo === 'object' && profile_photo.url) {
         profile_photo = profile_photo.url;
       }
+      const today = new Date().toISOString().split('T')[0];
       const [result] = await pool.query(
-        'INSERT INTO agent (name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, isagent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, hashedPassword, 'unverified']
+        'INSERT INTO agent (name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, password, isagent, register_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [name, father_name, mobile_no, mail_id, address, profile_photo, alternate_mobile_no, hashedPassword, 'unverified', today]
       );
       res.status(201).json({ message: 'Agent registered successfully', agentId: result.insertId });
     } catch (error) {
