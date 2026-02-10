@@ -533,7 +533,7 @@ router.put('/snapshot/:itrId', authenticateToken, async (req, res) => {
   try {
     // Check if agentedit is allowed for this ITR
     const [itrRows] = await pool.query(
-      'SELECT agentedit FROM itr WHERE id = ? AND agent_id = ?',
+      'SELECT agentedit, status FROM itr WHERE id = ? AND agent_id = ?',
       [itrId, req.agentId]
     );
 
@@ -541,7 +541,7 @@ router.put('/snapshot/:itrId', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'ITR not found' });
     }
 
-    if (!itrRows[0].agentedit) {
+    if (!itrRows[0].agentedit && itrRows[0].status !== 'Rejected') {
       return res.status(403).json({ message: 'Edit not allowed for this ITR. Please request permission from subadmin/superadmin.' });
     }
 
